@@ -1,10 +1,13 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy import select
+
+from sqlalchemy import func
 
 from app.core.database import AsyncSessionLocal
 from app.models.stock_quote import StockQuote
-
-stock_cache: dict = {}
+from app.services.volume_detection import is_volume_spike
+stock_cache: dict = {}  
 
 WATCHED_SYMBOLS = ["2330", "2317"]
 POLL_INTERVAL = 3  # seconds
@@ -21,6 +24,16 @@ async def _save_quote(symbol: str, data: dict) -> None:
         ))
         await session.commit()
 
+async def get_average_volume(symbol: str) -> float:
+    five_days_ago = datetime.utcnow() - timedelta(days=5)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(func.avg(StockQuote.volume))
+            .where(StockQuote.symbol == symbol)
+            .where(StockQuote.recorded_at >= five_days_ago)
+        )
+        avg = result.scalar()
+        return float(avg) if avg else 0.0
 
 async def poll_stocks(client) -> None:
     loop = asyncio.get_event_loop()
@@ -39,7 +52,11 @@ async def poll_stocks(client) -> None:
                 }
                 stock_cache[symbol] = data
                 await _save_quote(symbol, data)
+                avg_volume = await get_average_volume(symbol)
+                if is_volume_spike(data["volume"], avg_volume):
+                    print(f"[ALERT] Volume spike detected for {symbol}! Current: {data['volume']}, Average: {avg_volume:.2f}")
             except Exception as e:
                 print(f"[poller] {symbol}: {e}")
 
         await asyncio.sleep(POLL_INTERVAL)
+
