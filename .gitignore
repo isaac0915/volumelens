@@ -19,5 +19,8 @@ build/
 .vscode/
 .idea/
 
+# Claude Code
+.claude/
+
 # Docker
 postgres_data/
