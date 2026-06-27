@@ -6,6 +6,7 @@ from fugle_marketdata import RestClient
 
 from app.core.config import settings
 from app.services.stock_poller import poll_stocks, stock_cache
+from app.services.radar import run_radar
 
 fugle_client = RestClient(api_key=settings.fugle_api_key)
 
@@ -13,12 +14,15 @@ fugle_client = RestClient(api_key=settings.fugle_api_key)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(poll_stocks(fugle_client))
+    radar_task = asyncio.create_task(run_radar(fugle_client))
     yield
     task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    radar_task.cancel()
+    for t in [task, radar_task]:
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Taiwan Stock Monitor API", lifespan=lifespan)
