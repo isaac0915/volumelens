@@ -1,7 +1,11 @@
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
+from app.core.database import AsyncSessionLocal
+from app.models.volume_alert import VolumeAlert
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 VOLUME_MULTIPLIER = 2.0
@@ -88,8 +92,18 @@ async def _scan_once(client) -> None:
     if alerts:
         alerts.sort(key=lambda x: -x[4])
         logger.info(f"[radar] === ABNORMAL VOLUME: {len(alerts)} stocks ===")
-        for symbol, name, vol, avg, ratio in alerts:
-            logger.info(f"[radar]  {symbol} {name:12s}  volume {vol:>10,}  ({ratio:.1f}x avg {avg:>10,.0f})")
+        async with AsyncSessionLocal() as session:
+            for symbol, name, vol, avg, ratio in alerts:
+                logger.info(f"[radar]  {symbol} {name:12s}  volume {vol:>10,}  ({ratio:.1f}x avg {avg:>10,.0f})")
+                session.add(VolumeAlert(
+                    symbol=symbol,
+                    name=name,
+                    current_volume=vol,
+                    average_volume=avg,
+                    ratio=ratio,
+                    detected_at=datetime.utcnow(),
+                ))
+            await session.commit()
     else:
         logger.info("[radar] Scan complete — no abnormal volume detected")
 
