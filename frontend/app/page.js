@@ -1,12 +1,19 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatTime } from '@/lib/format'
 
-function StockCard({ stock, prevPrice }) {
-  const delta = prevPrice != null ? stock.price - prevPrice : 0
-  const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'
+// "2026-09-24" -> "9/24"
+function formatShortDate(isoDate) {
+  const [, m, d] = isoDate.split('-').map(Number)
+  return `${m}/${d}`
+}
+
+function StockCard({ stock }) {
+  // change is vs the previous close, from the live quote or the daily candle
+  const change = stock.change ?? 0
+  const direction = change > 0 ? 'up' : change < 0 ? 'down' : 'flat'
 
   const badgeStyles = {
     up: 'bg-red-50 text-red-600',
@@ -31,16 +38,20 @@ function StockCard({ stock, prevPrice }) {
           <p className="text-gray-500 mt-1 text-sm">{stock.name}</p>
         </div>
         <span className={`text-xs font-medium px-2 py-1 rounded-full ${badgeStyles[direction]}`}>
-          {arrow[direction]} {Math.abs(delta).toFixed(2)}
+          {arrow[direction]} {Math.abs(change).toFixed(2)}
         </span>
       </div>
       <p className={`text-3xl font-semibold mt-4 tabular-nums ${priceStyles[direction]}`}>
         {stock.price.toFixed(2)}
       </p>
       <p className="text-sm text-gray-600 mt-2">
-        Volume: <span className="font-medium">{stock.volume.toLocaleString()}</span>
+        成交量 <span className="font-medium">{stock.volume.toLocaleString()}</span> 張
       </p>
-      <p className="text-xs text-gray-400 mt-3">Updated {formatTime(stock.updated_at)}</p>
+      <p className="text-xs text-gray-400 mt-3">
+        {stock.source === 'close'
+          ? `${formatShortDate(stock.updated_at)} 收盤`
+          : `Updated ${formatTime(stock.updated_at)}`}
+      </p>
     </Link>
   )
 }
@@ -61,7 +72,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastFetched, setLastFetched] = useState(null)
-  const prevPricesRef = useRef({})
+  const [marketOpen, setMarketOpen] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -74,14 +85,8 @@ export default function Home() {
         })
         .then(data => {
           if (cancelled) return
-          setStocks(current => {
-            const nextPrices = {}
-            for (const symbol of Object.keys(current)) {
-              nextPrices[symbol] = current[symbol].price
-            }
-            prevPricesRef.current = nextPrices
-            return data.data
-          })
+          setStocks(data.data)
+          setMarketOpen(data.market_open)
           setError(null)
           setLastFetched(new Date().toISOString())
         })
@@ -103,6 +108,11 @@ export default function Home() {
 
   const stockList = Object.values(stocks)
 
+  let status = { dot: 'bg-gray-300', text: 'Connecting…' }
+  if (error) status = { dot: 'bg-red-500', text: 'Connection issue' }
+  else if (marketOpen) status = { dot: 'bg-green-500 animate-pulse', text: `Live · updated ${formatTime(lastFetched)}` }
+  else if (marketOpen === false) status = { dot: 'bg-gray-400', text: '已收盤 · 顯示最近收盤價' }
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
@@ -111,8 +121,8 @@ export default function Home() {
           <Link href="/radar" className="text-sm font-medium text-blue-600 hover:underline">爆量雷達 →</Link>
         </div>
         <div className="flex items-center gap-2 text-sm text-gray-500">
-          <span className={`w-2 h-2 rounded-full ${error ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`} />
-          {error ? 'Connection issue' : lastFetched ? `Live · updated ${formatTime(lastFetched)}` : 'Connecting…'}
+          <span className={`w-2 h-2 rounded-full ${status.dot}`} />
+          {status.text}
         </div>
       </div>
 
@@ -131,11 +141,7 @@ export default function Home() {
         )}
 
         {stockList.map(stock => (
-          <StockCard
-            key={stock.symbol}
-            stock={stock}
-            prevPrice={prevPricesRef.current[stock.symbol]}
-          />
+          <StockCard key={stock.symbol} stock={stock} />
         ))}
       </div>
     </div>

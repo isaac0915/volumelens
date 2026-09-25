@@ -6,6 +6,8 @@ from sqlalchemy import func
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.stock import Stock
+from app.models.stock_candle import StockCandle
 from app.models.stock_quote import StockQuote
 from app.services.market_hours import is_market_open
 from app.services.volume_detection import is_volume_spike
@@ -37,6 +39,36 @@ async def get_average_volume(symbol: str) -> float:
         avg = result.scalar()
         return float(avg) if avg else 0.0
 
+async def get_latest_closes(symbols: list[str]) -> dict:
+    """Latest daily close per symbol, shaped like a stock_cache entry.
+
+    Used when the in-memory cache is empty, e.g. outside market hours or after a
+    restart, so the dashboard still shows the last close instead of nothing.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(StockCandle, Stock.name)
+            .outerjoin(Stock, Stock.symbol == StockCandle.symbol)
+            .where(StockCandle.symbol.in_(symbols))
+            .distinct(StockCandle.symbol)
+            .order_by(StockCandle.symbol, StockCandle.date.desc())
+        )
+        rows = result.all()
+
+    return {
+        candle.symbol: {
+            "symbol": candle.symbol,
+            "name": name or candle.symbol,
+            "price": float(candle.close),
+            "change": float(candle.change),
+            "volume": candle.volume // 1000,  # candles are in shares; live quotes in lots (張)
+            "updated_at": candle.date.isoformat(),
+            "source": "close",
+        }
+        for candle, name in rows
+    }
+
+
 async def poll_stocks(client) -> None:
     loop = asyncio.get_event_loop()
     while True:
@@ -54,8 +86,10 @@ async def poll_stocks(client) -> None:
                     "symbol": symbol,
                     "name": quote.get("name", "Unknown"),
                     "price": quote.get("lastPrice", 0),
+                    "change": quote.get("change", 0),
                     "volume": quote.get("total", {}).get("tradeVolume", 0),
                     "updated_at": datetime.utcnow().isoformat(),
+                    "source": "live",
                 }
                 stock_cache[symbol] = data
                 await _save_quote(symbol, data)

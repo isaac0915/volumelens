@@ -45,7 +45,7 @@ pip install -r requirements.txt
 - `frontend` — Next.js on port 3000 (run separately, not in Docker Compose)
 
 **Request flow:**
-On startup, `lifespan` in `main.py` launches three asyncio background tasks: `poll_stocks`, `run_radar` and `run_daily_sync`. The poller fetches quotes for `WATCHED_SYMBOLS` (default: `["2330", "2317"]`) every 3 seconds via the Fugle REST API, persists each quote to `stock_quotes`, computes a 5-day rolling average volume from the DB, checks for a spike (2× threshold via `is_volume_spike()`), and writes to the in-memory `stock_cache`.
+On startup, `lifespan` in `main.py` launches three asyncio background tasks: `poll_stocks`, `run_radar` and `run_daily_sync`. The poller fetches quotes for `WATCHED_SYMBOLS` (default: `["2330", "2317"]`) every 3 seconds via the Fugle REST API, persists each quote to `stock_quotes`, computes a 5-day rolling average volume from the DB, checks for a spike (2× threshold via `is_volume_spike()`), and writes to the in-memory `stock_cache`. `/api/stocks` returns that cache plus `market_open`; any watched symbol missing from it (outside market hours or after a restart) falls back to its latest daily candle via `get_latest_closes()` (`source: "close"`, volume converted to lots), so the dashboard never renders empty.
 
 **Frontend proxy:**
 `next.config.mjs` rewrites all `/api/*` requests to `http://localhost:8000/api/*`, so the frontend calls `/api/stocks` and the backend receives it — both must be running simultaneously.
@@ -82,7 +82,7 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 - `app/script/backfill_market.py` — whole-market daily backfill by date (TWSE + TPEx); preferred over `backfill_candles.py`
 - `app/script/backfill_candles.py` — per-symbol Fugle backfill (e.g. `--symbols 2330`); not run by the API
 - `alembic/env.py` — Alembic async config; import new models here so autogenerate detects them
-- `frontend/app/page.js` — Next.js dashboard; polls `/api/stocks` every 3 seconds
+- `frontend/app/page.js` — Next.js dashboard; polls `/api/stocks` every 3 seconds; shows Live vs 已收盤 from `market_open`
 - `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock detail page with price/volume charts, backed by `/api/stocks/{symbol}/detail`
 - `frontend/next.config.mjs` — proxy rewrite from `/api/*` to backend
 - `.env` — credentials (gitignored); see `.env.example`

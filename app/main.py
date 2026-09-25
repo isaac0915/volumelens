@@ -12,7 +12,14 @@ from app.models.stock_quote import StockQuote
 from app.models.volume_alert import VolumeAlert
 from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
-from app.services.stock_poller import get_average_volume, poll_stocks, stock_cache
+from app.services.market_hours import is_market_open
+from app.services.stock_poller import (
+    WATCHED_SYMBOLS,
+    get_average_volume,
+    get_latest_closes,
+    poll_stocks,
+    stock_cache,
+)
 from app.services.daily_sync import run_daily_sync
 from app.services.radar import run_radar
 
@@ -39,8 +46,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Taiwan Stock Monitor API", lifespan=lifespan)
 
 @app.get("/api/stocks")
-def get_cached_stocks():
-    return {"status": "success", "data": stock_cache}
+async def get_stocks():
+    """Live quotes from the poller; symbols it hasn't quoted fall back to the latest close."""
+    data = dict(stock_cache)
+    missing = [s for s in WATCHED_SYMBOLS if s not in data]
+    if missing:
+        data.update(await get_latest_closes(missing))
+    return {"status": "success", "market_open": is_market_open(), "data": data}
 
 
 @app.get("/api/alerts")
