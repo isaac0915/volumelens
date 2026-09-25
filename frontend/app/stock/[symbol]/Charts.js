@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { formatTime } from '@/lib/format'
+import { CandlestickSeries, createChart, ColorType } from 'lightweight-charts';
 
 const CHART_THEME_CSS = `
 .viz-root {
@@ -255,4 +256,61 @@ export function VolumeBarChart({ points }) {
       </div>
     </div>
   )
+}
+
+
+export function CandlestickChart({ data, backgroundColor = 'white', textColor = 'black' }) {
+  const chartContainerRef = useRef()
+  const chartRef = useRef(null)
+  const seriesRef = useRef(null)
+  const hasFittedRef = useRef(false)
+
+  // Create the chart once; data updates are handled by the effect below.
+  useEffect(() => {
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: backgroundColor },
+        textColor,
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: 300,
+    })
+
+    // Taiwan convention: red = up, green = down
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: '#dc2626',
+      downColor: '#16a34a',
+      borderVisible: false,
+      wickUpColor: '#dc2626',
+      wickDownColor: '#16a34a',
+    })
+
+    chartRef.current = chart
+    seriesRef.current = series
+
+    const handleResize = () => {
+      chart.applyOptions({ width: chartContainerRef.current.clientWidth })
+    }
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      chart.remove()
+      chartRef.current = null
+      seriesRef.current = null
+      hasFittedRef.current = false
+    }
+  }, [backgroundColor, textColor])
+
+  useEffect(() => {
+    if (!seriesRef.current) return
+    seriesRef.current.setData(data)
+    // Only fit once so polling doesn't reset the user's zoom/scroll
+    if (!hasFittedRef.current && data.length > 0) {
+      chartRef.current.timeScale().fitContent()
+      hasFittedRef.current = true
+    }
+  }, [data])
+
+  return <div ref={chartContainerRef} />
 }

@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.stock_quote import StockQuote
 from app.models.volume_alert import VolumeAlert
+from app.models.stock_candle import StockCandle
 from app.services.stock_poller import get_average_volume, poll_stocks, stock_cache
 from app.services.radar import run_radar
 
@@ -78,6 +79,13 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
         )
         alerts = alerts_result.scalars().all()
 
+        daily_candles_result = await session.execute(
+            select(StockCandle)
+            .where(StockCandle.symbol == symbol)
+            .order_by(StockCandle.date.asc())
+        )
+        daily_candles = daily_candles_result.scalars().all()
+
     if not history and symbol not in stock_cache:
         raise HTTPException(status_code=404, detail=f"No data found for symbol {symbol}")
 
@@ -104,6 +112,19 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
                     "detected_at": a.detected_at.isoformat(),
                 }
                 for a in alerts
+            ],
+            "daily_candles": [
+                {
+                    "date": c.date.isoformat(),
+                    "open": float(c.open),
+                    "high": float(c.high),
+                    "low": float(c.low),
+                    "close": float(c.close),
+                    "volume": c.volume,
+                    "turnover": float(c.turnover),
+                    "change": float(c.change),
+                }
+                for c in daily_candles
             ],
         },
     }
@@ -135,6 +156,7 @@ def get_stock_info(stock_id: str):
             }
         }
         
+
     except Exception as e:
         # Handle errors (e.g., invalid stock ID or API key issues)
         raise HTTPException(status_code=404, detail=f"Fugle API Error or Stock not found: {str(e)}")

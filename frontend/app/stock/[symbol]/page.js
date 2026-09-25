@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { formatTime, formatDateTime } from '@/lib/format'
-import { ChartTheme, PriceLineChart, VolumeBarChart } from './Charts'
+import { ChartTheme, PriceLineChart, VolumeBarChart, CandlestickChart } from './Charts'
 
 export default function StockDetailPage() {
   const { symbol } = useParams()
@@ -41,6 +41,15 @@ export default function StockDetailPage() {
 
   const points = detail
     ? [...detail.history].reverse().map(q => ({ time: q.recorded_at, price: q.price, volume: q.volume }))
+    : []
+  const candles = detail
+    ? detail.daily_candles.map(c => ({
+      time: c.date,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }))
     : []
 
   return (
@@ -91,6 +100,11 @@ export default function StockDetailPage() {
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Price</h2>
             <PriceLineChart points={points} />
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-sm font-semibold text-gray-700 mb-4">日 K 線</h2>
+            <CandlestickChart data={candles} />
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
