@@ -381,31 +381,4 @@ async def get_stock_detail(symbol: str):
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Taiwan Stock Monitor API backend"}
-
-@app.get("/api/stock/{stock_id}")
-def get_stock_info(stock_id: str):
-    try:
-        # Fetch real-time intraday quote from Fugle API
-        quote_data = fugle_client.stock.intraday.quote(symbol=stock_id)
-        
-        # Parse the required fields (price and volume)
-        # Note: 'lastPrice' is the current price, 'total' contains volume info
-        last_price = quote_data.get("lastPrice", 0)
-        total_volume = quote_data.get("total", {}).get("tradeVolume", 0)
-        stock_name = quote_data.get("name", "Unknown")
-
-        return {
-            "status": "success",
-            "data": {
-                "symbol": stock_id,
-                "name": stock_name,
-                "price": last_price,
-                "volume": total_volume
-            }
-        }
-        
-
-    except Exception as e:
-        # Handle errors (e.g., invalid stock ID or API key issues)
-        raise HTTPException(status_code=404, detail=f"Fugle API Error or Stock not found: {str(e)}")
+    return {"message": "VolumeLens API"}
