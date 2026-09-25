@@ -54,7 +54,7 @@ On startup, `lifespan` in `main.py` launches two asyncio background tasks: `poll
 A full-market scanner that fetches 20-day historical volume averages for all Taiwan equity tickers on init, then scans the full market every 60 seconds with up to 10 concurrent Fugle calls. It is wired into `main.py`'s `lifespan` as a second `asyncio.create_task`. Spikes (2× average) are persisted as `VolumeAlert` rows and logged, not just printed.
 
 **Stock candles / backfill (`app/models/stock_candle.py`, `app/script/backfill_candles.py`):**
-`StockCandle` stores daily OHLCV + turnover/change per symbol (unique on `symbol`+`date`). `backfill_candles.py` is a standalone one-off script (not run by the API) that pulls historical daily candles from Fugle for a hardcoded symbol/date range and upserts them, skipping days already stored — edit the `symbol`/date range at the top before running with `docker compose exec api python -m app.script.backfill_candles`.
+`StockCandle` stores daily OHLCV + turnover/change per symbol (unique on `symbol`+`date`; `volume` is `BigInteger` since some ETFs trade >2.1B shares/day). `backfill_candles.py` is a standalone script (not run by the API) that pulls daily candles from Fugle for the whole market (or `--symbols`) over the last `--days` (default 180) and inserts them with `ON CONFLICT DO NOTHING`, committing per symbol and retrying on HTTP 429 — safe to re-run. Test with `--limit 5`: `docker compose exec api python -m app.script.backfill_candles --limit 5`.
 
 **Database layer (`app/core/database.py`):**
 Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by background services. `get_db()` is the async dependency for FastAPI routes. Alembic uses an async engine (`alembic/env.py`); new models must be imported there (with `# noqa: F401`) so autogenerate can detect them.
@@ -71,7 +71,7 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 - `app/models/stock_quote.py` — `StockQuote` ORM model; add new models by subclassing `Base` from `app.core.database`
 - `app/models/volume_alert.py` — `VolumeAlert` ORM model, persisted by the radar scanner
 - `app/models/stock_candle.py` — `StockCandle` ORM model (daily OHLCV), populated only via the backfill script
-- `app/script/backfill_candles.py` — one-off standalone script to backfill `stock_candles` for a symbol/date range; not run by the API
+- `app/script/backfill_candles.py` — standalone script to backfill `stock_candles` for the whole market; not run by the API
 - `alembic/env.py` — Alembic async config; import new models here so autogenerate detects them
 - `frontend/app/page.js` — Next.js dashboard; polls `/api/stocks` every 3 seconds
 - `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock detail page with price/volume charts, backed by `/api/stocks/{symbol}/detail`
