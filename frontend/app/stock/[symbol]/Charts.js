@@ -63,7 +63,7 @@ export function PriceLineChart({ points }) {
   const height = 260
 
   if (points.length === 0) {
-    return <p className="text-sm text-gray-400">No price history yet.</p>
+    return <p className="text-sm text-gray-400">尚無盤中價格資料。</p>
   }
 
   const plotWidth = Math.max(width - MARGIN.left - MARGIN.right, 0)
@@ -188,7 +188,7 @@ export function VolumeBarChart({ points }) {
   const height = 140
 
   if (points.length === 0) {
-    return <p className="text-sm text-gray-400">No volume history yet.</p>
+    return <p className="text-sm text-gray-400">尚無盤中成交量資料。</p>
   }
 
   const plotWidth = Math.max(width - MARGIN.left - MARGIN.right, 0)

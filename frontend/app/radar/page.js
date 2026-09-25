@@ -98,10 +98,8 @@ export default function RadarPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <Link href="/" className="text-sm text-blue-600 hover:underline">← 台股監控</Link>
-
-      <div className="mt-4 mb-6">
+    <div>
+      <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">爆量雷達</h1>
         <p className="text-sm text-gray-500 mt-2">
           每 60 秒掃描全市場股票，成交量達 20 日均量 2 倍以上即列入。每檔股票每天只顯示當日最高倍數。
@@ -126,11 +124,11 @@ export default function RadarPage() {
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
-          Couldn&apos;t load alerts ({error}).
+          無法載入爆量資料（{error}）。
         </div>
       )}
 
-      {!error && !groups && <p className="text-gray-500 text-sm">Loading…</p>}
+      {!error && !groups && <p className="text-gray-500 text-sm">載入中…</p>}
 
       {groups && groups.length === 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-10 text-center">

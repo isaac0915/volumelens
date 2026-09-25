@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
 import { formatTime, formatDateTime } from '@/lib/format'
 import { ChartTheme, PriceLineChart, VolumeBarChart, CandlestickChart } from './Charts'
 
@@ -53,12 +52,10 @@ export default function StockDetailPage() {
     : []
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div>
       <ChartTheme />
 
-      <Link href="/" className="text-sm text-blue-600 hover:underline">← 台股監控</Link>
-
-      <div className="flex items-baseline gap-3 mt-4 mb-6 flex-wrap">
+      <div className="flex items-baseline gap-3 mb-6 flex-wrap">
         <h1 className="text-3xl font-bold text-gray-900">{detail?.current?.name ?? detail?.name ?? symbol}</h1>
         <span className="text-lg text-gray-400">{symbol}</span>
         {detail?.current && (
@@ -70,35 +67,35 @@ export default function StockDetailPage() {
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
-          Couldn&apos;t load stock data ({error}).
+          無法載入股票資料（{error}）。
         </div>
       )}
 
-      {!error && !detail && <p className="text-gray-500 text-sm">Loading…</p>}
+      {!error && !detail && <p className="text-gray-500 text-sm">載入中…</p>}
 
       {detail && (
         <div className="space-y-8">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-xs text-gray-500">Current volume</p>
+              <p className="text-xs text-gray-500">即時成交量（張）</p>
               <p className="text-xl font-semibold tabular-nums">{detail.current?.volume?.toLocaleString() ?? '–'}</p>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-xs text-gray-500">5-day avg volume</p>
+              <p className="text-xs text-gray-500">5 日均量</p>
               <p className="text-xl font-semibold tabular-nums">{Math.round(detail.average_volume_5d).toLocaleString()}</p>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-xs text-gray-500">Data points</p>
+              <p className="text-xs text-gray-500">報價筆數</p>
               <p className="text-xl font-semibold tabular-nums">{points.length}</p>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-xs text-gray-500">Last updated</p>
+              <p className="text-xs text-gray-500">最後更新</p>
               <p className="text-xl font-semibold">{formatTime(detail.current?.updated_at)}</p>
             </div>
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">Price</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-4">即時價格</h2>
             <PriceLineChart points={points} />
           </div>
 
@@ -110,19 +107,19 @@ export default function StockDetailPage() {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">Volume</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-4">即時成交量</h2>
             <VolumeBarChart points={points} />
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Recent volume alerts</h2>
-            {detail.alerts.length === 0 && <p className="text-sm text-gray-400">No spikes detected recently.</p>}
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">近期爆量紀錄</h2>
+            {detail.alerts.length === 0 && <p className="text-sm text-gray-400">近期沒有爆量紀錄。</p>}
             {detail.alerts.length > 0 && (
               <ul className="space-y-1">
                 {detail.alerts.map((a, i) => (
                   <li key={i} className="text-sm flex justify-between text-gray-600">
                     <span>{formatDateTime(a.detected_at)}</span>
-                    <span className="font-medium text-orange-600">{a.ratio.toFixed(1)}× avg</span>
+                    <span className="font-medium text-orange-600">{a.ratio.toFixed(1)} 倍均量</span>
                   </li>
                 ))}
               </ul>
@@ -130,16 +127,16 @@ export default function StockDetailPage() {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Recent quotes</h2>
-            {detail.history.length === 0 && <p className="text-sm text-gray-400">No history yet.</p>}
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">最近報價</h2>
+            {detail.history.length === 0 && <p className="text-sm text-gray-400">尚無報價紀錄。</p>}
             {detail.history.length > 0 && (
               <div className="max-h-80 overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-gray-400">
-                      <th className="font-normal pb-1">Time</th>
-                      <th className="font-normal pb-1 text-right">Price</th>
-                      <th className="font-normal pb-1 text-right">Volume</th>
+                      <th className="font-normal pb-1">時間</th>
+                      <th className="font-normal pb-1 text-right">價格</th>
+                      <th className="font-normal pb-1 text-right">成交量</th>
                     </tr>
                   </thead>
                   <tbody>

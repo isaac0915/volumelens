@@ -50,7 +50,7 @@ function StockCard({ stock }) {
       <p className="text-xs text-gray-400 mt-3">
         {stock.source === 'close'
           ? `${formatShortDate(stock.updated_at)} 收盤`
-          : `Updated ${formatTime(stock.updated_at)}`}
+          : `更新於 ${formatTime(stock.updated_at)}`}
       </p>
     </Link>
   )
@@ -108,18 +108,15 @@ export default function Home() {
 
   const stockList = Object.values(stocks)
 
-  let status = { dot: 'bg-gray-300', text: 'Connecting…' }
-  if (error) status = { dot: 'bg-red-500', text: 'Connection issue' }
-  else if (marketOpen) status = { dot: 'bg-green-500 animate-pulse', text: `Live · updated ${formatTime(lastFetched)}` }
+  let status = { dot: 'bg-gray-300', text: '連線中…' }
+  if (error) status = { dot: 'bg-red-500', text: '連線異常' }
+  else if (marketOpen) status = { dot: 'bg-green-500 animate-pulse', text: `盤中即時 · ${formatTime(lastFetched)}` }
   else if (marketOpen === false) status = { dot: 'bg-gray-400', text: '已收盤 · 顯示最近收盤價' }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
-        <div className="flex items-baseline gap-4">
-          <h1 className="text-3xl font-bold text-gray-900">台股監控</h1>
-          <Link href="/radar" className="text-sm font-medium text-blue-600 hover:underline">爆量雷達 →</Link>
-        </div>
+        <h1 className="text-2xl font-bold text-gray-900">自選股</h1>
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <span className={`w-2 h-2 rounded-full ${status.dot}`} />
           {status.text}
@@ -128,7 +125,7 @@ export default function Home() {
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
-          Couldn&apos;t reach the server ({error}). Showing last known data.
+          無法連線到伺服器（{error}），目前顯示最後取得的資料。
         </div>
       )}
 
@@ -137,7 +134,7 @@ export default function Home() {
           Array.from({ length: 2 }).map((_, i) => <StockCardSkeleton key={i} />)}
 
         {!loading && stockList.length === 0 && !error && (
-          <p className="text-gray-500">No stock data yet.</p>
+          <p className="text-gray-500">目前沒有資料。</p>
         )}
 
         {stockList.map(stock => (

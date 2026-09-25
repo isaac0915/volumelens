@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Query
 from fugle_marketdata import RestClient
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -53,6 +53,29 @@ async def get_stocks():
     if missing:
         data.update(await get_latest_closes(missing))
     return {"status": "success", "market_open": is_market_open(), "data": data}
+
+
+@app.get("/api/search")
+async def search_stocks(q: str = Query(min_length=1, max_length=20), limit: int = Query(default=8, ge=1, le=20)):
+    """Match symbols by prefix and names by substring; exact symbol first, then prefix, then name."""
+    q = q.strip()
+    rank = case(
+        (Stock.symbol == q, 0),
+        (Stock.symbol.startswith(q, autoescape=True), 1),
+        else_=2,
+    )
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Stock)
+            .where(or_(Stock.symbol.startswith(q, autoescape=True), Stock.name.contains(q, autoescape=True)))
+            .order_by(rank, Stock.symbol)
+            .limit(limit)
+        )
+        stocks = result.scalars().all()
+    return {
+        "status": "success",
+        "data": [{"symbol": s.symbol, "name": s.name, "exchange": s.exchange} for s in stocks],
+    }
 
 
 @app.get("/api/alerts")
