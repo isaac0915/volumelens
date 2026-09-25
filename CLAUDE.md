@@ -56,6 +56,9 @@ A full-market scanner that fetches 20-day historical volume averages for all Tai
 **Stock candles / backfill (`app/models/stock_candle.py`, `app/script/backfill_candles.py`):**
 `StockCandle` stores daily OHLCV + turnover/change per symbol (unique on `symbol`+`date`; `volume` is `BigInteger` since some ETFs trade >2.1B shares/day). `backfill_candles.py` is a standalone script (not run by the API) that pulls daily candles from Fugle for the whole market (or `--symbols`) over the last `--days` (default 180) and inserts them with `ON CONFLICT DO NOTHING`, committing per symbol and retrying on HTTP 429 — safe to re-run. Test with `--limit 5`: `docker compose exec api python -m app.script.backfill_candles --limit 5`.
 
+**Market-wide daily data (`app/services/exchange_daily.py`, `app/script/backfill_market.py`):**
+Historical daily candles come from the TWSE (`MI_INDEX`) and TPEx (`dailyQuotes`) website JSON endpoints — one request per exchange per day returns the whole market, versus one Fugle call per symbol. `fetch_market_day()` parses and cleans both (comma-separated numbers, `--`/`---` for no trade, TWSE's HTML sign column, TPEx trailing spaces) and keeps only 4-digit stocks and `00`-prefixed ETFs (~2,300 symbols). These endpoints are undocumented: TPEx often truncates its ~2MB response (retried up to 3x), and TWSE blocks IPs that request too fast (3s throttle). `backfill_market.py --days 180` skips weekends and days already holding ≥2,000 rows, so it is safe to re-run. Fugle stays the source for intraday data (poller, radar scans).
+
 **Database layer (`app/core/database.py`):**
 Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by background services. `get_db()` is the async dependency for FastAPI routes. Alembic uses an async engine (`alembic/env.py`); new models must be imported there (with `# noqa: F401`) so autogenerate can detect them.
 
@@ -72,7 +75,9 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 - `app/models/stock_quote.py` — `StockQuote` ORM model; add new models by subclassing `Base` from `app.core.database`
 - `app/models/volume_alert.py` — `VolumeAlert` ORM model, persisted by the radar scanner
 - `app/models/stock_candle.py` — `StockCandle` ORM model (daily OHLCV), populated only via the backfill script
-- `app/script/backfill_candles.py` — standalone script to backfill `stock_candles` for the whole market; not run by the API
+- `app/services/exchange_daily.py` — fetch/clean one day of whole-market candles from TWSE + TPEx
+- `app/script/backfill_market.py` — whole-market daily backfill by date (TWSE + TPEx); preferred over `backfill_candles.py`
+- `app/script/backfill_candles.py` — per-symbol Fugle backfill (e.g. `--symbols 2330`); not run by the API
 - `alembic/env.py` — Alembic async config; import new models here so autogenerate detects them
 - `frontend/app/page.js` — Next.js dashboard; polls `/api/stocks` every 3 seconds
 - `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock detail page with price/volume charts, backed by `/api/stocks/{symbol}/detail`

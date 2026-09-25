@@ -6,3 +6,4 @@ alembic==1.13.3
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
 fugle-marketdata
+requests
