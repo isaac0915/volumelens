@@ -40,6 +40,41 @@ def _fetch_batch(channels: list[str]) -> list[dict]:
     return payload.get("msgArray", [])
 
 
+INDEX_CHANNELS = {"TAIEX": "tse_t00.tw", "TPEX": "otc_o00.tw"}
+
+
+def _float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def fetch_indices() -> list[dict]:
+    """TAIEX (加權指數) and the TPEx index (櫃買指數): latest value, previous close, as-of."""
+    rows = await asyncio.to_thread(_fetch_batch, list(INDEX_CHANNELS.values()))
+    by_channel = {f"{m.get('ex')}_{m.get('c')}.tw": m for m in rows}
+
+    indices = []
+    for key, channel in INDEX_CHANNELS.items():
+        m = by_channel.get(channel)
+        if not m:
+            continue
+        value, prev = _float(m.get("z")), _float(m.get("y"))
+        if value is None or prev is None:
+            continue
+        indices.append({
+            "key": key,
+            "name": "加權指數" if key == "TAIEX" else "櫃買指數",
+            "value": value,
+            "change": round(value - prev, 2),
+            "change_pct": round((value - prev) / prev * 100, 2),
+            "date": f"{m['d'][:4]}-{m['d'][4:6]}-{m['d'][6:]}",
+            "time": m.get("t"),
+        })
+    return indices
+
+
 async def fetch_volumes(exchanges: dict[str, str], trading_day: date) -> tuple[dict[str, tuple[str, int]], int]:
     """Cumulative volume for each symbol in {symbol: exchange}.
 

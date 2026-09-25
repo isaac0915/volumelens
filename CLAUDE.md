@@ -67,7 +67,7 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 
 ## Key Files
 
-- `app/main.py` — FastAPI entry point; `lifespan` starts the stock poller and radar scanner; all HTTP routes (`/api/stocks`, `/api/search`, `/api/alerts`, `/api/stocks/{symbol}/detail`)
+- `app/main.py` — FastAPI entry point; `lifespan` starts the stock poller and radar scanner; all HTTP routes (`/api/stocks`, `/api/market`, `/api/daily-spikes`, `/api/search`, `/api/alerts`, `/api/stocks/{symbol}/detail`). `/api/market` returns TAIEX/TPEx indices from MIS (`tse_t00`/`otc_o00`, cached 15s). `/api/daily-spikes` finds latest-trading-day spikes from `stock_candles` (volume ≥2× the previous 20 days via `AVG() OVER (ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING)`, ≥500 lots), so it works outside market hours unlike the intraday radar
 - `app/services/stock_poller.py` — background poller; edit `WATCHED_SYMBOLS` to change tracked stocks
 - `app/services/radar.py` — full-market volume spike scanner; 20-day averages from `stock_candles`, intraday volume from TWSE MIS; persists spikes to `VolumeAlert`
 - `app/services/mis_quotes.py` — batched intraday volume from TWSE's MIS endpoint (TWSE + TPEx symbols)
@@ -83,7 +83,7 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 - `app/script/backfill_candles.py` — per-symbol Fugle backfill (e.g. `--symbols 2330`); not run by the API
 - `alembic/env.py` — Alembic async config; import new models here so autogenerate detects them
 - `frontend/app/layout.js` + `frontend/components/NavBar.js` / `StockSearch.js` — site shell: sticky nav (首頁 / 爆量雷達), stock search backed by `/api/search` (symbol prefix or name substring, keyboard navigable), max-w-6xl container, data-source footer. UI copy is Traditional Chinese
-- `frontend/app/page.js` — Next.js dashboard; polls `/api/stocks` every 3 seconds; shows Live vs 已收盤 from `market_open`
+- `frontend/app/page.js` — 市場總覽 dashboard: index cards (`/api/market`), watchlist with change % (`/api/stocks`, 3s), and 收盤爆量排行 (`/api/daily-spikes`); shows 盤中 vs 已收盤 from `market_open`
 - `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock detail page with price/volume charts, backed by `/api/stocks/{symbol}/detail`
 - `frontend/next.config.mjs` — proxy rewrite from `/api/*` to backend
 - `.env` — credentials (gitignored); see `.env.example`

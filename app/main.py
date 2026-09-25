@@ -1,4 +1,5 @@
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +14,7 @@ from app.models.volume_alert import VolumeAlert
 from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
 from app.services.market_hours import is_market_open
+from app.services.mis_quotes import fetch_indices
 from app.services.stock_poller import (
     WATCHED_SYMBOLS,
     get_average_volume,
@@ -53,6 +55,94 @@ async def get_stocks():
     if missing:
         data.update(await get_latest_closes(missing))
     return {"status": "success", "market_open": is_market_open(), "data": data}
+
+
+INDEX_CACHE_SECONDS = 15  # the dashboard polls every few seconds; don't forward each poll to MIS
+_index_cache: dict = {"at": 0.0, "data": []}
+
+
+@app.get("/api/market")
+async def get_market():
+    """Market indices, cached briefly so many viewers don't multiply MIS requests."""
+    now = time.monotonic()
+    if now - _index_cache["at"] > INDEX_CACHE_SECONDS:
+        try:
+            _index_cache["data"] = await fetch_indices()
+        except Exception:
+            pass  # keep serving the last good value
+        _index_cache["at"] = now
+    return {"status": "success", "market_open": is_market_open(), "data": {"indices": _index_cache["data"]}}
+
+
+DAILY_SPIKE_MULTIPLIER = 2.0
+DAILY_SPIKE_MIN_SHARES = 500_000  # 500 lots, same noise floor as the intraday radar
+
+
+@app.get("/api/daily-spikes")
+async def get_daily_spikes(limit: int = Query(default=5, ge=1, le=100)):
+    """Volume spikes on the latest trading day in stock_candles.
+
+    Each day's volume is compared with the average of that symbol's previous 20
+    trading days (a window of ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING), so
+    this works after the close and on weekends, unlike the intraday radar.
+    """
+    async with AsyncSessionLocal() as session:
+        latest = (await session.execute(select(func.max(StockCandle.date)))).scalar_one()
+        if latest is None:
+            return {"status": "success", "data": {"date": None, "total": 0, "stocks": []}}
+
+        window = {"partition_by": StockCandle.symbol, "order_by": StockCandle.date, "rows": (-20, -1)}
+        recent = (
+            select(
+                StockCandle.symbol,
+                StockCandle.date,
+                StockCandle.close,
+                StockCandle.change,
+                StockCandle.volume,
+                func.avg(StockCandle.volume).over(**window).label("avg_volume"),
+                func.count().over(**window).label("history_days"),
+            )
+            .where(StockCandle.date >= latest - timedelta(days=45))
+            .subquery()
+        )
+        ratio = (recent.c.volume / recent.c.avg_volume).label("ratio")
+        result = await session.execute(
+            select(recent, ratio, Stock.name)
+            .join(Stock, Stock.symbol == recent.c.symbol)
+            .where(
+                recent.c.date == latest,
+                recent.c.history_days >= 10,
+                recent.c.volume >= DAILY_SPIKE_MIN_SHARES,
+                recent.c.volume >= DAILY_SPIKE_MULTIPLIER * recent.c.avg_volume,
+            )
+            .order_by(ratio.desc())
+        )
+        rows = result.all()
+
+    def pct(close, change):
+        prev = float(close) - float(change)
+        return round(float(change) / prev * 100, 2) if prev else 0.0
+
+    return {
+        "status": "success",
+        "data": {
+            "date": latest.isoformat(),
+            "total": len(rows),
+            "stocks": [
+                {
+                    "symbol": r.symbol,
+                    "name": r.name,
+                    "close": float(r.close),
+                    "change": float(r.change),
+                    "change_pct": pct(r.close, r.change),
+                    "volume": r.volume // 1000,  # lots (張)
+                    "average_volume": round(float(r.avg_volume) / 1000),
+                    "ratio": round(float(r.ratio), 2),
+                }
+                for r in rows[:limit]
+            ],
+        },
+    }
 
 
 @app.get("/api/search")
