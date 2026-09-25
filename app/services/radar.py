@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 
 from app.core.database import AsyncSessionLocal
 from app.models.volume_alert import VolumeAlert
+from app.services.market_hours import is_market_open
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -114,8 +115,15 @@ async def run_radar(client) -> None:
         logger.error("[radar] No symbols loaded, radar disabled")
         return
 
-    await _load_volume_averages(client, symbols)
-
     while True:
+        # Only hit Fugle during market hours: quotes don't change after close,
+        # and deferring the averages load avoids re-fetching on every reload.
+        if not is_market_open():
+            await asyncio.sleep(SCAN_INTERVAL)
+            continue
+
+        if not volume_averages:
+            await _load_volume_averages(client, symbols)
+
         await _scan_once(client)
         await asyncio.sleep(SCAN_INTERVAL)

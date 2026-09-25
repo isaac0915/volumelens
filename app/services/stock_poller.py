@@ -1,6 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, time
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from sqlalchemy import func
@@ -8,26 +7,13 @@ from sqlalchemy import func
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.stock_quote import StockQuote
+from app.services.market_hours import is_market_open
 from app.services.volume_detection import is_volume_spike
 
 stock_cache: dict = {}
 
 WATCHED_SYMBOLS = ["2330", "2317"]
 POLL_INTERVAL = 3  # seconds
-
-_TZ_TAIPEI = ZoneInfo("Asia/Taipei")
-_MARKET_OPEN = time(9, 0)
-_MARKET_CLOSE = time(13, 30)
-
-
-def is_market_open() -> bool:
-    if settings.force_poll:
-        return True
-    now = datetime.now(_TZ_TAIPEI)
-    if now.weekday() >= 5:  # Saturday=5, Sunday=6
-        return False
-    return _MARKET_OPEN <= now.time() <= _MARKET_CLOSE
-
 
 async def _save_quote(symbol: str, data: dict) -> None:
     async with AsyncSessionLocal() as session:
