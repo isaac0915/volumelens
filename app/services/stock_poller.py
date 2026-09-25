@@ -1,8 +1,6 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from sqlalchemy import select
-
-from sqlalchemy import func
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -10,12 +8,14 @@ from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
 from app.models.stock_quote import StockQuote
 from app.services.market_hours import is_market_open
-from app.services.volume_detection import is_volume_spike
 
 stock_cache: dict = {}
 
 WATCHED_SYMBOLS = ["2330", "2317"]
 POLL_INTERVAL = 3  # seconds
+
+# symbol -> (price, volume) of the last row written, to skip unchanged quotes
+_last_saved: dict[str, tuple] = {}
 
 async def _save_quote(symbol: str, data: dict) -> None:
     async with AsyncSessionLocal() as session:
@@ -27,17 +27,6 @@ async def _save_quote(symbol: str, data: dict) -> None:
             recorded_at=datetime.utcnow(),
         ))
         await session.commit()
-
-async def get_average_volume(symbol: str) -> float:
-    five_days_ago = datetime.utcnow() - timedelta(days=5)
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(func.avg(StockQuote.volume))
-            .where(StockQuote.symbol == symbol)
-            .where(StockQuote.recorded_at >= five_days_ago)
-        )
-        avg = result.scalar()
-        return float(avg) if avg else 0.0
 
 async def get_latest_closes(symbols: list[str]) -> dict:
     """Latest daily close per symbol, shaped like a stock_cache entry.
@@ -88,14 +77,15 @@ async def poll_stocks(client) -> None:
                     "price": quote.get("lastPrice", 0),
                     "change": quote.get("change", 0),
                     "volume": quote.get("total", {}).get("tradeVolume", 0),
-                    "updated_at": datetime.utcnow().isoformat(),
+                    # UTC-aware ISO string so browsers convert it correctly
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                     "source": "live",
                 }
                 stock_cache[symbol] = data
-                await _save_quote(symbol, data)
-                avg_volume = await get_average_volume(symbol)
-                if is_volume_spike(data["volume"], avg_volume):
-                    print(f"[ALERT] Volume spike detected for {symbol}! Current: {data['volume']}, Average: {avg_volume:.2f}")
+                # Most 3-second polls see no new trade; only store actual changes
+                if _last_saved.get(symbol) != (data["price"], data["volume"]):
+                    await _save_quote(symbol, data)
+                    _last_saved[symbol] = (data["price"], data["volume"])
             except Exception as e:
                 print(f"[poller] {symbol}: {e}")
 

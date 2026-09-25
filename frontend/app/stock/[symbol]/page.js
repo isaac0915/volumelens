@@ -72,7 +72,7 @@ export default function StockDetailPage() {
     let cancelled = false
 
     const fetchDetail = () => {
-      fetch(`/api/stocks/${symbol}/detail?limit=200`)
+      fetch(`/api/stocks/${symbol}/detail`)
         .then(res => {
           if (!res.ok) throw new Error(res.status === 404 ? '找不到這檔股票' : `Request failed: ${res.status}`)
           return res.json()
@@ -112,9 +112,12 @@ export default function StockDetailPage() {
 
   const latest = candles[candles.length - 1]
   const live = detail?.current
+  // Intraday quotes (one per minute) from the latest session the poller recorded
   const points = detail
-    ? [...detail.history].reverse().map(q => ({ time: q.recorded_at, price: q.price, volume: q.volume }))
+    ? detail.history.map(q => ({ time: q.recorded_at, price: q.price, volume: q.volume }))
     : []
+  // Only show intraday charts for the latest trading day, not a stale session
+  const showIntraday = points.length > 0 && latest && detail.session_date >= latest.time
 
   // Header price: the live quote when the poller tracks this symbol, else the latest close
   const price = live?.price ?? latest?.close
@@ -255,8 +258,8 @@ export default function StockDetailPage() {
             </Card>
           </div>
 
-          {points.length > 0 && (
-            <Card title="盤中走勢">
+          {showIntraday && (
+            <Card title={`盤中走勢 · ${formatShortDate(detail.session_date)}`}>
               <div className="space-y-6">
                 <PriceLineChart points={points} />
                 <VolumeBarChart points={points} />

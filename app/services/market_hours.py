@@ -3,9 +3,9 @@ from zoneinfo import ZoneInfo
 
 from app.core.config import settings
 
-_TZ_TAIPEI = ZoneInfo("Asia/Taipei")
-_MARKET_OPEN = time(9, 0)
-_MARKET_CLOSE = time(13, 30)
+TZ_TAIPEI = ZoneInfo("Asia/Taipei")
+MARKET_OPEN = time(9, 0)
+MARKET_CLOSE = time(13, 30)
 
 
 def is_market_open() -> bool:
@@ -16,7 +16,7 @@ def is_market_open() -> bool:
     """
     if settings.force_poll:
         return True
-    now = datetime.now(_TZ_TAIPEI)
+    now = datetime.now(TZ_TAIPEI)
     if now.weekday() >= 5:  # Saturday=5, Sunday=6
         return False
-    return _MARKET_OPEN <= now.time() <= _MARKET_CLOSE
+    return MARKET_OPEN <= now.time() <= MARKET_CLOSE

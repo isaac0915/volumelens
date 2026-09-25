@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Query
 from fugle_marketdata import RestClient
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import Date, Time, case, func, or_, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -13,11 +13,10 @@ from app.models.stock_quote import StockQuote
 from app.models.volume_alert import VolumeAlert
 from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
-from app.services.market_hours import is_market_open
+from app.services.market_hours import MARKET_CLOSE, MARKET_OPEN, is_market_open
 from app.services.mis_quotes import fetch_indices
 from app.services.stock_poller import (
     WATCHED_SYMBOLS,
-    get_average_volume,
     get_latest_closes,
     poll_stocks,
     stock_cache,
@@ -216,15 +215,33 @@ async def get_alerts(days: int = Query(default=7, ge=1, le=30)):
 
 
 @app.get("/api/stocks/{symbol}/detail")
-async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le=1000)):
+async def get_stock_detail(symbol: str):
+    # recorded_at is naive UTC; convert to Taipei wall time to find trading sessions
+    taipei = func.timezone("Asia/Taipei", func.timezone("UTC", StockQuote.recorded_at))
+    in_session = (
+        (func.extract("isodow", taipei) <= 5)
+        & (func.cast(taipei, Time) >= MARKET_OPEN)
+        & (func.cast(taipei, Time) <= MARKET_CLOSE)
+    )
+
     async with AsyncSessionLocal() as session:
-        history_result = await session.execute(
-            select(StockQuote)
-            .where(StockQuote.symbol == symbol)
-            .order_by(StockQuote.recorded_at.desc())
-            .limit(limit)
-        )
-        history = history_result.scalars().all()
+        # Intraday history: the latest trading session only, one quote per minute
+        # (the last in each minute), so the chart shows one day, not a mix of days
+        latest_day = (
+            await session.execute(
+                select(func.max(func.cast(taipei, Date))).where(StockQuote.symbol == symbol, in_session)
+            )
+        ).scalar_one()
+        history = []
+        if latest_day:
+            minute = func.date_trunc("minute", StockQuote.recorded_at)
+            history_result = await session.execute(
+                select(StockQuote)
+                .where(StockQuote.symbol == symbol, in_session, func.cast(taipei, Date) == latest_day)
+                .distinct(minute)
+                .order_by(minute, StockQuote.recorded_at.desc())
+            )
+            history = history_result.scalars().all()
 
         alerts_result = await session.execute(
             select(VolumeAlert)
@@ -246,20 +263,18 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
     if not history and not alerts and not daily_candles and symbol not in stock_cache:
         raise HTTPException(status_code=404, detail=f"No data found for symbol {symbol}")
 
-    avg_volume = await get_average_volume(symbol)
-
     return {
         "status": "success",
         "data": {
             "name": stock.name if stock else None,
             "exchange": stock.exchange if stock else None,
             "current": stock_cache.get(symbol),
-            "average_volume_5d": avg_volume,
+            "session_date": latest_day.isoformat() if latest_day else None,
             "history": [
                 {
                     "price": float(q.price),
                     "volume": q.volume,
-                    "recorded_at": q.recorded_at.isoformat(),
+                    "recorded_at": q.recorded_at.replace(tzinfo=timezone.utc).isoformat(),
                 }
                 for q in history
             ],

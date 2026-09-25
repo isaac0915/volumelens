@@ -45,7 +45,7 @@ pip install -r requirements.txt
 - `frontend` — Next.js on port 3000 (run separately, not in Docker Compose)
 
 **Request flow:**
-On startup, `lifespan` in `main.py` launches three asyncio background tasks: `poll_stocks`, `run_radar` and `run_daily_sync`. The poller fetches quotes for `WATCHED_SYMBOLS` (default: `["2330", "2317"]`) every 3 seconds via the Fugle REST API, persists each quote to `stock_quotes`, computes a 5-day rolling average volume from the DB, checks for a spike (2× threshold via `is_volume_spike()`), and writes to the in-memory `stock_cache`. `/api/stocks` returns that cache plus `market_open`; any watched symbol missing from it (outside market hours or after a restart) falls back to its latest daily candle via `get_latest_closes()` (`source: "close"`, volume converted to lots), so the dashboard never renders empty.
+On startup, `lifespan` in `main.py` launches three asyncio background tasks: `poll_stocks`, `run_radar` and `run_daily_sync`. The poller fetches Fugle quotes for `WATCHED_SYMBOLS` (default: `["2330", "2317"]`) every 3 seconds during market hours, writes them to the in-memory `stock_cache`, and persists a `stock_quotes` row only when price or volume changed since the last write. `/api/stocks` returns that cache plus `market_open`; any watched symbol missing from it (outside market hours or after a restart) falls back to its latest daily candle via `get_latest_closes()` (`source: "close"`, volume converted to lots), so the dashboard never renders empty.
 
 **Frontend proxy:**
 `next.config.mjs` rewrites all `/api/*` requests to `http://localhost:8000/api/*`, so the frontend calls `/api/stocks` and the backend receives it — both must be running simultaneously.
@@ -62,6 +62,9 @@ Historical daily candles come from the TWSE (`MI_INDEX`) and TPEx (`dailyQuotes`
 **Database layer (`app/core/database.py`):**
 Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by background services. `get_db()` is the async dependency for FastAPI routes. Alembic uses an async engine (`alembic/env.py`); new models must be imported there (with `# noqa: F401`) so autogenerate can detect them.
 
+**Time handling:**
+DB `DateTime` columns (`stock_quotes.recorded_at`, `volume_alerts.detected_at`) store **naive UTC**. API responses must serialize them with `.replace(tzinfo=timezone.utc).isoformat()` (or use `datetime.now(timezone.utc)`), otherwise browsers read the string as the viewer's local time. The frontend formats all times in `Asia/Taipei` (`frontend/lib/format.js`) regardless of viewer timezone. Trading-day logic (market hours, "today", sync cutoffs) uses Asia/Taipei; the container clock is UTC. In SQL, `timezone('Asia/Taipei', timezone('UTC', col))` converts a naive-UTC column to Taipei wall time (used by the detail endpoint to pick the latest 09:00–13:30 session, returned as one quote per minute).
+
 **Config (`app/core/config.py`):**
 `pydantic-settings` reads `.env` with `extra = "ignore"`. Fields: `DATABASE_URL`, `FUGLE_API_KEY`, `FORCE_POLL` (set to `true` to bypass market-hours check during development).
 
@@ -72,7 +75,6 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 - `app/services/radar.py` — full-market volume spike scanner; 20-day averages from `stock_candles`, intraday volume from TWSE MIS; persists spikes to `VolumeAlert`
 - `app/services/mis_quotes.py` — batched intraday volume from TWSE's MIS endpoint (TWSE + TPEx symbols)
 - `app/services/market_hours.py` — `is_market_open()` (Mon–Fri 09:00–13:30 Asia/Taipei, bypassed by `FORCE_POLL`); used by poller and radar
-- `app/services/volume_detection.py` — `is_volume_spike()` utility
 - `app/models/stock_quote.py` — `StockQuote` ORM model; add new models by subclassing `Base` from `app.core.database`
 - `app/models/volume_alert.py` — `VolumeAlert` ORM model, persisted by the radar scanner
 - `app/models/stock.py` — `Stock` (symbol → name, exchange TWSE/TPEx), upserted by the daily sync; `ensure_stock_list()` fills it if empty
