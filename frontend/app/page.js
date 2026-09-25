@@ -106,7 +106,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
-        <h1 className="text-3xl font-bold text-gray-900">台股監控</h1>
+        <div className="flex items-baseline gap-4">
+          <h1 className="text-3xl font-bold text-gray-900">台股監控</h1>
+          <Link href="/radar" className="text-sm font-medium text-blue-600 hover:underline">爆量雷達 →</Link>
+        </div>
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <span className={`w-2 h-2 rounded-full ${error ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`} />
           {error ? 'Connection issue' : lastFetched ? `Live · updated ${formatTime(lastFetched)}` : 'Connecting…'}

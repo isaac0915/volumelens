@@ -1,9 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Query
 from fugle_marketdata import RestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -38,25 +39,49 @@ def get_cached_stocks():
 
 
 @app.get("/api/alerts")
-async def get_alerts():
+async def get_alerts(days: int = Query(default=7, ge=1, le=30)):
+    """Recent volume spikes, one row per stock per day (the day's highest ratio).
+
+    The radar re-inserts an alert every scan while a stock stays above the
+    threshold, so rows are grouped by (day, symbol) to avoid duplicates.
+    detected_at is stored in UTC; Taiwan market hours (09:00-13:30 UTC+8)
+    fall on the same UTC date, so date(detected_at) is the trading day.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    day = func.date(VolumeAlert.detected_at).label("day")
+    max_ratio = func.max(VolumeAlert.ratio).label("max_ratio")
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(VolumeAlert).order_by(VolumeAlert.detected_at.desc()).limit(50)
+            select(
+                day,
+                VolumeAlert.symbol,
+                VolumeAlert.name,
+                max_ratio,
+                func.max(VolumeAlert.current_volume).label("max_volume"),
+                func.max(VolumeAlert.average_volume).label("average_volume"),
+                func.max(VolumeAlert.detected_at).label("last_detected_at"),
+            )
+            .where(VolumeAlert.detected_at >= cutoff)
+            .group_by(day, VolumeAlert.symbol, VolumeAlert.name)
+            .order_by(day.desc(), max_ratio.desc())
         )
-        alerts = result.scalars().all()
+        rows = result.all()
+
+    grouped: dict[str, list] = {}
+    for r in rows:
+        grouped.setdefault(r.day.isoformat(), []).append({
+            "symbol": r.symbol,
+            "name": r.name,
+            "ratio": float(r.max_ratio),
+            "max_volume": r.max_volume,
+            "average_volume": float(r.average_volume),
+            "last_detected_at": r.last_detected_at.replace(tzinfo=timezone.utc).isoformat(),
+        })
+
     return {
         "status": "success",
-        "data": [
-            {
-                "symbol": a.symbol,
-                "name": a.name,
-                "current_volume": a.current_volume,
-                "average_volume": float(a.average_volume),
-                "ratio": float(a.ratio),
-                "detected_at": a.detected_at.isoformat(),
-            }
-            for a in alerts
-        ],
+        "data": [{"date": d, "stocks": stocks} for d, stocks in grouped.items()],
     }
 
 
@@ -86,7 +111,7 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
         )
         daily_candles = daily_candles_result.scalars().all()
 
-    if not history and symbol not in stock_cache:
+    if not history and not alerts and not daily_candles and symbol not in stock_cache:
         raise HTTPException(status_code=404, detail=f"No data found for symbol {symbol}")
 
     avg_volume = await get_average_volume(symbol)
@@ -106,10 +131,11 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
             ],
             "alerts": [
                 {
+                    "name": a.name,
                     "current_volume": a.current_volume,
                     "average_volume": float(a.average_volume),
                     "ratio": float(a.ratio),
-                    "detected_at": a.detected_at.isoformat(),
+                    "detected_at": a.detected_at.replace(tzinfo=timezone.utc).isoformat(),
                 }
                 for a in alerts
             ],

@@ -59,7 +59,7 @@ export default function StockDetailPage() {
       <Link href="/" className="text-sm text-blue-600 hover:underline">← 台股監控</Link>
 
       <div className="flex items-baseline gap-3 mt-4 mb-6 flex-wrap">
-        <h1 className="text-3xl font-bold text-gray-900">{detail?.current?.name ?? symbol}</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{detail?.current?.name ?? detail?.alerts?.[0]?.name ?? symbol}</h1>
         <span className="text-lg text-gray-400">{symbol}</span>
         {detail?.current && (
           <span className="text-2xl font-semibold text-gray-900 ml-auto tabular-nums">
@@ -104,7 +104,9 @@ export default function StockDetailPage() {
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">日 K 線</h2>
-            <CandlestickChart data={candles} />
+            {candles.length > 0
+              ? <CandlestickChart data={candles} />
+              : <p className="text-sm text-gray-400">尚無日 K 資料。</p>}
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6">
