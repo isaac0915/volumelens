@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDate, formatLots, formatPct, formatTime, marketHoursLocal, rvolStyle, toneOf } from '@/lib/format'
+import WatchButton from '@/components/WatchButton'
 
 const INTRADAY_RANGES = [
   { days: 1, label: 'Today' },
@@ -63,6 +64,30 @@ function RvolBadge({ ratio }) {
   )
 }
 
+// A table row: the link covers the data cells; the watchlist star sits beside it
+// (a button can't be nested inside a link)
+function Row({ symbol, name, columns, children }) {
+  return (
+    <div className="flex items-center transition-colors hover:bg-gray-50">
+      <Link href={`/stock/${symbol}`} className={`grid min-w-0 flex-1 items-center gap-3 py-3 pl-4 ${columns}`}>
+        {children}
+      </Link>
+      <div className="w-12 pl-2 pr-3">
+        <WatchButton symbol={symbol} name={name} />
+      </div>
+    </div>
+  )
+}
+
+function HeaderRow({ columns, children }) {
+  return (
+    <div className="hidden border-b border-gray-100 text-xs text-gray-400 sm:flex">
+      <div className={`grid flex-1 gap-3 py-2 pl-4 ${columns}`}>{children}</div>
+      <span className="w-12" />
+    </div>
+  )
+}
+
 const EOD_COLUMNS = 'grid-cols-[4rem_minmax(0,1fr)_auto] sm:grid-cols-[4rem_minmax(0,1fr)_6rem_6rem_6rem_5rem]'
 const INTRADAY_COLUMNS = 'grid-cols-[4rem_minmax(0,1fr)_auto] sm:grid-cols-[4rem_minmax(0,1fr)_6rem_6rem_5rem_5rem]'
 
@@ -83,23 +108,19 @@ function EndOfDay() {
           {data.total} stocks{data.total > data.stocks.length ? ` · top ${data.stocks.length} shown` : ''}
         </span>
       </div>
-      <div className={`hidden gap-3 border-b border-gray-100 px-4 py-2 text-xs text-gray-400 sm:grid ${EOD_COLUMNS}`}>
+      <HeaderRow columns={EOD_COLUMNS}>
         <span>Symbol</span>
         <span>Name</span>
         <span className="text-right">Close</span>
         <span className="text-right">Volume</span>
         <span className="text-right">20D Avg</span>
         <span className="text-right">RVOL</span>
-      </div>
+      </HeaderRow>
       <div className="divide-y divide-gray-100">
         {data.stocks.map(stock => {
           const tone = toneOf(stock.change)
           return (
-            <Link
-              key={stock.symbol}
-              href={`/stock/${stock.symbol}`}
-              className={`grid items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50 ${EOD_COLUMNS}`}
-            >
+            <Row key={stock.symbol} symbol={stock.symbol} name={stock.name} columns={EOD_COLUMNS}>
               <span className="font-semibold tabular-nums text-gray-900">{stock.symbol}</span>
               <span className="truncate text-gray-700">{stock.name}</span>
               <span className={`hidden text-right text-sm tabular-nums sm:block ${tone.text}`}>
@@ -108,7 +129,7 @@ function EndOfDay() {
               <span className="hidden text-right text-sm tabular-nums text-gray-600 sm:block">{formatLots(stock.volume)}</span>
               <span className="hidden text-right text-sm tabular-nums text-gray-400 sm:block">{formatLots(stock.average_volume)}</span>
               <RvolBadge ratio={stock.ratio} />
-            </Link>
+            </Row>
           )
         })}
       </div>
@@ -152,21 +173,17 @@ function Intraday() {
             </h2>
             <span className="text-sm text-gray-400">{group.stocks.length} stocks</span>
           </div>
-          <div className={`hidden gap-3 border-b border-gray-100 px-4 py-2 text-xs text-gray-400 sm:grid ${INTRADAY_COLUMNS}`}>
+          <HeaderRow columns={INTRADAY_COLUMNS}>
             <span>Symbol</span>
             <span>Name</span>
             <span className="text-right">Peak Volume</span>
             <span className="text-right">20D Avg</span>
             <span className="text-right">Last Seen</span>
             <span className="text-right">RVOL</span>
-          </div>
+          </HeaderRow>
           <div className="divide-y divide-gray-100">
             {group.stocks.map(stock => (
-              <Link
-                key={stock.symbol}
-                href={`/stock/${stock.symbol}`}
-                className={`grid items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50 ${INTRADAY_COLUMNS}`}
-              >
+              <Row key={stock.symbol} symbol={stock.symbol} name={stock.name} columns={INTRADAY_COLUMNS}>
                 <span className="font-semibold tabular-nums text-gray-900">{stock.symbol}</span>
                 <span className="truncate text-gray-700">
                   {stock.name}
@@ -180,7 +197,7 @@ function Intraday() {
                 <span className="hidden text-right text-sm tabular-nums text-gray-400 sm:block">{formatLots(stock.average_volume)}</span>
                 <span className="hidden text-right text-xs tabular-nums text-gray-400 sm:block">{formatTime(stock.last_detected_at)}</span>
                 <RvolBadge ratio={stock.ratio} />
-              </Link>
+              </Row>
             ))}
           </div>
         </section>

@@ -3,19 +3,23 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { formatDate, formatLots, formatPct, formatTime, rvolStyle, toneOf } from '@/lib/format'
+import { useWatchlist } from '@/lib/watchlist'
+import WatchButton from '@/components/WatchButton'
 
 const INDEX_NAMES = { TAIEX: 'TAIEX', TPEX: 'TPEx Index' }
 const REPO_URL = 'https://github.com/isaac0915/stock_tracker'
 
-const STOCKS_POLL_MS = 3000
+const STOCKS_POLL_MS = 5000 // live quotes are cached ~10s server-side
 const MARKET_POLL_MS = 15000
 const SPIKES_POLL_MS = 10 * 60 * 1000
 
 // Poll a JSON endpoint; returns [data, error]. The previous data is kept on error.
+// A null url pauses polling.
 function usePolling(url, intervalMs) {
   const [state, setState] = useState({ data: null, error: null })
 
   useEffect(() => {
+    if (!url) return
     let cancelled = false
     const load = () => {
       fetch(url)
@@ -149,54 +153,62 @@ function WatchlistRow({ stock }) {
   const pct = prevClose ? (change / prevClose) * 100 : 0
   const tone = toneOf(change)
 
+  // The star sits beside the link, not inside it: a button nested in a link is invalid HTML
   return (
-    <Link
-      href={`/stock/${stock.symbol}`}
-      className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-gray-50"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold text-gray-900">
-          {stock.name} <span className="ml-1 text-sm font-normal text-gray-400">{stock.symbol}</span>
-        </p>
-        <p className="mt-0.5 text-xs text-gray-400">
-          Vol {formatLots(stock.volume)} ·{' '}
-          {stock.source === 'close' ? `Close · ${formatDate(stock.updated_at)}` : `${formatTime(stock.updated_at)} Taipei`}
-        </p>
+    <div className="flex items-center transition-colors hover:bg-gray-50">
+      <Link href={`/stock/${stock.symbol}`} className="flex min-w-0 flex-1 items-center gap-4 py-4 pl-5">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-semibold text-gray-900">
+            {stock.name} <span className="ml-1 text-sm font-normal text-gray-400">{stock.symbol}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-gray-400">
+            Vol {formatLots(stock.volume)} ·{' '}
+            {stock.source === 'close' ? `Close · ${formatDate(stock.updated_at)}` : `${formatTime(stock.updated_at)} Taipei`}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className={`text-xl font-semibold tabular-nums ${tone.text}`}>{stock.price.toFixed(2)}</p>
+          <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${tone.badge}`}>
+            {tone.arrow} {Math.abs(change).toFixed(2)} ({formatPct(pct)})
+          </span>
+        </div>
+      </Link>
+      <div className="pl-2 pr-3">
+        <WatchButton symbol={stock.symbol} name={stock.name} />
       </div>
-      <div className="text-right">
-        <p className={`text-xl font-semibold tabular-nums ${tone.text}`}>{stock.price.toFixed(2)}</p>
-        <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-xs font-medium tabular-nums ${tone.badge}`}>
-          {tone.arrow} {Math.abs(change).toFixed(2)} ({formatPct(pct)})
-        </span>
-      </div>
-    </Link>
+    </div>
   )
 }
 
 function SpikeRow({ rank, stock }) {
   const tone = toneOf(stock.change)
   return (
-    <Link
-      href={`/stock/${stock.symbol}`}
-      className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-3 sm:px-5 transition-colors hover:bg-gray-50"
-    >
-      <span className="text-sm font-semibold tabular-nums text-gray-400">{rank}</span>
-      <div className="min-w-0">
-        <p className="truncate font-medium text-gray-900">
-          {stock.name} <span className="ml-1 text-sm font-normal text-gray-400">{stock.symbol}</span>
-        </p>
-        <p className="mt-0.5 text-xs text-gray-400 tabular-nums">
-          Vol {formatLots(stock.volume)} · 20D avg {formatLots(stock.average_volume)}
-        </p>
+    <div className="flex items-center transition-colors hover:bg-gray-50">
+      <Link
+        href={`/stock/${stock.symbol}`}
+        className="grid min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)_auto_auto] items-center gap-3 py-3 pl-4 sm:pl-5"
+      >
+        <span className="text-sm font-semibold tabular-nums text-gray-400">{rank}</span>
+        <div className="min-w-0">
+          <p className="truncate font-medium text-gray-900">
+            {stock.name} <span className="ml-1 text-sm font-normal text-gray-400">{stock.symbol}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-gray-400 tabular-nums">
+            Vol {formatLots(stock.volume)} · 20D avg {formatLots(stock.average_volume)}
+          </p>
+        </div>
+        <div className="text-right tabular-nums">
+          <p className={`text-sm font-medium ${tone.text}`}>{stock.close.toFixed(2)}</p>
+          <p className={`text-xs ${tone.text}`}>{formatPct(stock.change_pct)}</p>
+        </div>
+        <span className={`w-16 rounded-full px-2 py-0.5 text-center text-sm font-semibold tabular-nums ${rvolStyle(stock.ratio)}`}>
+          {stock.ratio.toFixed(1)}×
+        </span>
+      </Link>
+      <div className="w-12 pl-2 pr-3">
+        <WatchButton symbol={stock.symbol} name={stock.name} />
       </div>
-      <div className="text-right tabular-nums">
-        <p className={`text-sm font-medium ${tone.text}`}>{stock.close.toFixed(2)}</p>
-        <p className={`text-xs ${tone.text}`}>{formatPct(stock.change_pct)}</p>
-      </div>
-      <span className={`w-16 rounded-full px-2 py-0.5 text-center text-sm font-semibold tabular-nums ${rvolStyle(stock.ratio)}`}>
-        {stock.ratio.toFixed(1)}×
-      </span>
-    </Link>
+    </div>
   )
 }
 
@@ -213,12 +225,15 @@ function RowSkeleton() {
 }
 
 export default function Home() {
-  const [stocksRes, stocksError] = usePolling('/api/stocks', STOCKS_POLL_MS)
+  const { symbols } = useWatchlist()
+  const quotesUrl = symbols.length ? `/api/quotes?symbols=${symbols.map(encodeURIComponent).join(',')}` : null
+  const [stocksRes, stocksError] = usePolling(quotesUrl, STOCKS_POLL_MS)
   const [marketRes] = usePolling('/api/market', MARKET_POLL_MS)
   const [spikesRes, spikesError] = usePolling('/api/daily-spikes?limit=8', SPIKES_POLL_MS)
 
   const marketOpen = stocksRes?.market_open ?? marketRes?.market_open ?? null
-  const stockList = stocksRes ? Object.values(stocksRes.data) : null
+  // Filter by the current list so a removed stock disappears before the next fetch
+  const stockList = symbols.length === 0 ? [] : stocksRes ? stocksRes.data.filter(s => symbols.includes(s.symbol)) : null
   const market = marketRes?.data
   const indices = market?.indices
   const spikes = spikesRes?.data
@@ -245,10 +260,10 @@ export default function Home() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <Card title="Watchlist" className="lg:col-span-2 self-start">
+        <Card title="Watchlist" subtitle="Saved in this browser" className="lg:col-span-2 self-start">
           <div className="divide-y divide-gray-100">
             {!stockList && [0, 1].map(i => <RowSkeleton key={i} />)}
-            {stockList?.length === 0 && <p className="px-5 py-4 text-sm text-gray-400">No data yet.</p>}
+            {stockList?.length === 0 && <p className="px-5 py-6 text-sm text-gray-400">Star ☆ any stock to add it to your watchlist.</p>}
             {stockList?.map(stock => <WatchlistRow key={stock.symbol} stock={stock} />)}
           </div>
         </Card>
@@ -259,11 +274,14 @@ export default function Home() {
           action={<Link href="/radar" className="text-sm font-medium text-blue-600 hover:underline">Intraday scanner →</Link>}
           className="lg:col-span-3"
         >
-          <div className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto_auto] gap-3 border-b border-gray-100 px-4 py-2 text-xs text-gray-400 sm:px-5">
-            <span>#</span>
-            <span>Stock</span>
-            <span className="text-right">Close</span>
-            <span className="w-16 text-center">RVOL</span>
+          <div className="flex border-b border-gray-100 text-xs text-gray-400">
+            <div className="grid flex-1 grid-cols-[1.25rem_minmax(0,1fr)_auto_auto] gap-3 py-2 pl-4 sm:pl-5">
+              <span>#</span>
+              <span>Stock</span>
+              <span className="text-right">Close</span>
+              <span className="w-16 text-center">RVOL</span>
+            </div>
+            <span className="w-12" />
           </div>
           <div className="divide-y divide-gray-100">
             {!spikes && !spikesError && [0, 1, 2, 3, 4].map(i => <RowSkeleton key={i} />)}

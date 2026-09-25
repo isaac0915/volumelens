@@ -13,7 +13,8 @@ I invest in Taiwan stocks and wanted a faster way to see where unusual interest 
 - **End-of-day rankings.** Every stock whose latest session traded at ≥2× its prior 20-day average volume (and ≥500K shares), ranked by RVOL. Works any time, including nights and weekends in the US.
 - **Intraday scanner.** During Taiwan market hours, the whole market is re-scanned about once a minute and flagged stocks are recorded once per day at their peak RVOL.
 - **Stock pages for every listing.** Daily candlesticks with a volume pane, unusual-volume markers, 1M/3M/6M ranges, and a history of unusual-volume days.
-- **Market overview.** TAIEX and TPEx index, a live watchlist, and the day's top unusual-volume names.
+- **Watchlist.** Star any stock to follow it; the list is saved in your browser (no account needed) and shows live quotes during market hours.
+- **Market overview.** TAIEX and TPEx index, your watchlist, and the day's top unusual-volume names.
 - **Search** by symbol or name, and a **US/Taiwan color toggle**: US convention (green = up) by default, or Taiwan's (red = up).
 
 | Unusual Volume | Stock page |
@@ -27,13 +28,13 @@ flowchart LR
     subgraph Sources
         TWSE["TWSE / TPEx<br/>daily closing quotes"]
         MIS["TWSE MIS<br/>intraday quotes"]
-        FUGLE["Fugle API<br/>watchlist quotes"]
+        FUGLE["Fugle API<br/>intraday history"]
     end
 
     subgraph API["FastAPI (asyncio background tasks)"]
         SYNC["Daily sync<br/>every 30 min"]
         RADAR["Intraday scanner<br/>~1 pass/min, market hours"]
-        POLLER["Watchlist poller<br/>every 3s, market hours"]
+        POLLER["Quote poller<br/>every 3s, market hours"]
         ROUTES["REST endpoints"]
     end
 
@@ -42,6 +43,7 @@ flowchart LR
 
     TWSE --> SYNC --> DB
     MIS --> RADAR --> DB
+    MIS -- "watchlist quotes" --> ROUTES
     FUGLE --> POLLER --> DB
     DB --> ROUTES --> WEB
     DB -- "20-day averages" --> RADAR
@@ -53,7 +55,7 @@ The FastAPI app starts three background tasks in its lifespan:
 | --- | --- | --- |
 | Daily sync | Keeps `stock_candles` complete: every 30 minutes, fetches any weekday in the last 10 days that isn't fully stored yet | TWSE + TPEx |
 | Intraday scanner | Loads 20-day averages from the database, then checks every listing's cumulative volume in batches of 100 | TWSE MIS |
-| Watchlist poller | Live quotes for the watchlist; stores a row only when price or volume changes | Fugle |
+| Quote poller | Intraday price history for a few default symbols; stores a row only when price or volume changes | Fugle |
 
 The database holds about 280K daily candles (six months × ~2,300 listings). The Next.js frontend talks to the API through a `/api/*` rewrite.
 
@@ -80,7 +82,7 @@ My brokerage app shows board lots plus after-hours fixed price (13,005 lots); th
 
 ### Scanning the whole market within rate limits
 
-Checking ~2,300 stocks once a minute with one Fugle request per symbol means ~2,300 requests a minute, well beyond the API's rate limit, and Fugle's batch snapshot endpoints return `Forbidden` on my plan. Worse, the original code swallowed the resulting HTTP 429s, so most of the market went unscanned without any sign of it. The scanner now uses TWSE's MIS endpoint, which accepts about 100 symbols per request (I measured the limit: 150 returns an error and ~300 overflows the URL). A full pass is **24 requests instead of ~2,300**; in a replay of one session it covered 2,302/2,302 symbols in about 70 seconds with no failures. Fugle is now only used for the watchlist.
+Checking ~2,300 stocks once a minute with one Fugle request per symbol means ~2,300 requests a minute, well beyond the API's rate limit, and Fugle's batch snapshot endpoints return `Forbidden` on my plan. Worse, the original code swallowed the resulting HTTP 429s, so most of the market went unscanned without any sign of it. The scanner now uses TWSE's MIS endpoint, which accepts about 100 symbols per request (I measured the limit: 150 returns an error and ~300 overflows the URL). A full pass is **24 requests instead of ~2,300**; in a replay of one session it covered 2,302/2,302 symbols in about 70 seconds with no failures. Watchlist quotes use the same batched endpoint, cached per symbol for 10 seconds so visitors with overlapping watchlists share requests; Fugle is only used for intraday price history of a few default symbols.
 
 ### Backfilling by date instead of by symbol
 
@@ -145,7 +147,8 @@ Open http://localhost:3000. After the backfill, the API's daily sync keeps the d
 | Endpoint | Description |
 | --- | --- |
 | `GET /api/market` | TAIEX and TPEx index, stocks tracked, latest session |
-| `GET /api/stocks` | Watchlist quotes (live, or the latest close) and `market_open` |
+| `GET /api/quotes?symbols=` | Quotes for up to 50 symbols (live during market hours, else the latest close) and `market_open` |
+| `GET /api/stocks` | Fugle-polled quotes for the default symbols |
 | `GET /api/daily-spikes?limit=` | Unusual volume on the latest trading day, ranked by RVOL |
 | `GET /api/alerts?days=` | Intraday scanner alerts, one per stock per day at peak RVOL |
 | `GET /api/stocks/{symbol}/detail` | Daily candles, latest intraday session and alerts for one stock |
@@ -161,15 +164,16 @@ app/
     exchange_daily.py     fetch + clean one day of TWSE/TPEx closing quotes
     radar.py              intraday unusual-volume scanner
     mis_quotes.py         batched TWSE MIS quotes (stocks and indices)
-    stock_poller.py       watchlist quotes from Fugle
+    stock_poller.py       Fugle quote poller for default symbols
     market_hours.py       Taiwan market-hours check
   models/                 SQLAlchemy models
   script/                 backfill scripts
 alembic/                  database migrations
 frontend/
   app/                    Next.js pages (overview, unusual volume, stock detail)
-  components/             nav, search, color convention toggle
+  components/             nav, search, watchlist star, color convention toggle
   lib/format.js           number, date and time formatting
+  lib/watchlist.js        per-browser watchlist store (localStorage)
 ```
 
 ## Limitations and next steps
@@ -178,7 +182,7 @@ frontend/
 - **Holiday calendar.** Market-hours checks don't know about Taiwan holidays, so the poller and scanner run (and find nothing) on those days. The daily sync already detects holidays from empty exchange data.
 - **Undocumented endpoints.** The TWSE, TPEx and MIS JSON endpoints could change without notice. Failures are logged per batch or exchange-day and retried on the next pass, but a format change would need a parser update.
 - **Tests and CI.** The parsers and window-function queries are good candidates for unit tests against recorded exchange responses.
-- **Configurable watchlist.** The watchlist is currently fixed in code.
+- **Accounts.** Watchlists live in the browser, so they don't sync across devices.
 
 ## Data and disclaimer
 

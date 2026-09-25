@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { formatDate, formatDateTime, formatLots, formatPct, formatTime, rvolStyle, toneOf } from '@/lib/format'
 import { ChartTheme, PriceLineChart, VolumeBarChart, CandlestickChart } from './Charts'
+import WatchButton from '@/components/WatchButton'
 
 const RANGES = [
   { days: 30, label: '1M' },
@@ -137,6 +138,9 @@ export default function StockDetailPage() {
             )}
           </div>
           {asOf && <p className="mt-1 text-sm text-gray-400">{asOf}</p>}
+          <div className="mt-3">
+            <WatchButton symbol={symbol} name={name} withLabel />
+          </div>
         </div>
         {price != null && (
           <div className="text-right">

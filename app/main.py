@@ -13,8 +13,8 @@ from app.models.stock_quote import StockQuote
 from app.models.volume_alert import VolumeAlert
 from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
-from app.services.market_hours import MARKET_CLOSE, MARKET_OPEN, is_market_open
-from app.services.mis_quotes import fetch_indices
+from app.services.market_hours import MARKET_CLOSE, MARKET_OPEN, TZ_TAIPEI, is_market_open
+from app.services.mis_quotes import fetch_indices, fetch_quotes
 from app.services.stock_poller import (
     WATCHED_SYMBOLS,
     get_latest_closes,
@@ -166,6 +166,56 @@ async def get_daily_spikes(limit: int = Query(default=5, ge=1, le=100)):
             ],
         },
     }
+
+
+MAX_QUOTE_SYMBOLS = 50
+QUOTE_CACHE_SECONDS = 10
+_quote_cache: dict[str, tuple[float, dict]] = {}  # symbol -> (fetched_at, live quote)
+
+
+@app.get("/api/quotes")
+async def get_quotes(symbols: str = Query(max_length=600, description="Comma-separated symbols")):
+    """Quotes for an arbitrary list of symbols, e.g. a viewer's watchlist.
+
+    During market hours, live prices come from the MIS endpoint in batches and
+    are cached per symbol for a few seconds, so many viewers with overlapping
+    watchlists share upstream requests. Outside market hours, or for symbols
+    without a trade yet today, each symbol falls back to its latest daily close.
+    Unknown symbols are dropped; results keep the requested order.
+    """
+    requested = list(dict.fromkeys(s.strip() for s in symbols.split(",") if s.strip()))[:MAX_QUOTE_SYMBOLS]
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(select(Stock).where(Stock.symbol.in_(requested)))).scalars().all()
+    exchanges = {s.symbol: s.exchange for s in rows}
+    known = [s for s in requested if s in exchanges]
+
+    data = await get_latest_closes(known)
+    market_open = is_market_open()
+    if market_open and known:
+        now = time.monotonic()
+        stale = {s: exchanges[s] for s in known if now - _quote_cache.get(s, (0.0, None))[0] > QUOTE_CACHE_SECONDS}
+        if stale:
+            try:
+                fresh = await fetch_quotes(stale, datetime.now(TZ_TAIPEI).date())
+            except Exception:
+                fresh = {}
+            for symbol in stale:
+                # Cache misses too, so a symbol with no trade yet isn't re-requested every poll
+                _quote_cache[symbol] = (now, fresh.get(symbol))
+        for symbol in known:
+            live = _quote_cache.get(symbol, (0.0, None))[1]
+            if live:
+                data[symbol] = {
+                    "symbol": symbol,
+                    "name": live["name"] or data.get(symbol, {}).get("name", symbol),
+                    "price": live["price"],
+                    "change": live["change"],
+                    "volume": live["volume"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "source": "live",
+                }
+
+    return {"status": "success", "market_open": market_open, "data": [data[s] for s in known if s in data]}
 
 
 @app.get("/api/search")

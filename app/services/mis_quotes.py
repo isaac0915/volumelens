@@ -75,6 +75,37 @@ async def fetch_indices() -> list[dict]:
     return indices
 
 
+async def fetch_quotes(exchanges: dict[str, str], trading_day: date) -> dict[str, dict]:
+    """Last price, change vs previous close and cumulative volume (lots) per symbol.
+
+    Symbols without a trade today, or whose last price isn't available ("-"),
+    are omitted so callers can fall back to the latest daily close.
+    """
+    channels = [_channel(s, ex) for s, ex in exchanges.items()]
+    day = trading_day.strftime("%Y%m%d")
+    quotes: dict[str, dict] = {}
+    for i in range(0, len(channels), BATCH_SIZE):
+        if i:
+            await asyncio.sleep(REQUEST_SPACING)
+        rows = await asyncio.to_thread(_fetch_batch, channels[i:i + BATCH_SIZE])
+        for m in rows:
+            price, prev = _float(m.get("z")), _float(m.get("y"))
+            if m.get("d") != day or price is None or prev is None:
+                continue
+            try:
+                volume = int(m["v"])
+            except (KeyError, ValueError):
+                continue
+            quotes[m["c"]] = {
+                "name": m.get("n", ""),
+                "price": price,
+                "change": round(price - prev, 2),
+                "volume": volume,
+                "time": m.get("t"),
+            }
+    return quotes
+
+
 async def fetch_volumes(exchanges: dict[str, str], trading_day: date) -> tuple[dict[str, tuple[str, int]], int]:
     """Cumulative volume for each symbol in {symbol: exchange}.
 
