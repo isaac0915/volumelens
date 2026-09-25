@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { formatTime } from '@/lib/format'
-import { CandlestickSeries, createChart, ColorType } from 'lightweight-charts';
+import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, HistogramSeries } from 'lightweight-charts'
 
 const CHART_THEME_CSS = `
 .viz-root {
@@ -259,58 +259,100 @@ export function VolumeBarChart({ points }) {
 }
 
 
-export function CandlestickChart({ data, backgroundColor = 'white', textColor = 'black' }) {
-  const chartContainerRef = useRef()
+const UP_COLOR = '#dc2626'   // Taiwan convention: red = up
+const DOWN_COLOR = '#16a34a' // green = down
+
+// candles: [{ time, open, high, low, close, volume }] ascending by time (volume in lots)
+// spikeDates: Set of dates to mark as volume spikes
+// rangeDays: how many calendar days to show, counted back from the latest candle
+export function CandlestickChart({ candles, spikeDates, rangeDays }) {
+  const containerRef = useRef()
   const chartRef = useRef(null)
-  const seriesRef = useRef(null)
-  const hasFittedRef = useRef(false)
+  const priceSeriesRef = useRef(null)
+  const volumeSeriesRef = useRef(null)
+  const markersRef = useRef(null)
+  const appliedRangeRef = useRef(null)
 
-  // Create the chart once; data updates are handled by the effect below.
+  // Create the chart once; data updates are handled by the effects below.
   useEffect(() => {
-    const chart = createChart(chartContainerRef.current, {
+    const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: backgroundColor },
-        textColor,
+        background: { type: ColorType.Solid, color: 'white' },
+        textColor: '#6b7280',
+        panes: { separatorColor: '#e5e7eb' },
       },
-      width: chartContainerRef.current.clientWidth,
-      height: 300,
+      grid: { vertLines: { color: '#f3f4f6' }, horzLines: { color: '#f3f4f6' } },
+      rightPriceScale: { borderVisible: false },
+      timeScale: { borderVisible: false },
+      localization: { locale: 'zh-TW' },
+      width: containerRef.current.clientWidth,
+      height: 420,
     })
 
-    // Taiwan convention: red = up, green = down
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: '#dc2626',
-      downColor: '#16a34a',
+    const priceSeries = chart.addSeries(CandlestickSeries, {
+      upColor: UP_COLOR,
+      downColor: DOWN_COLOR,
       borderVisible: false,
-      wickUpColor: '#dc2626',
-      wickDownColor: '#16a34a',
+      wickUpColor: UP_COLOR,
+      wickDownColor: DOWN_COLOR,
     })
+    // Volume lives in its own pane below the candles, sharing the time axis
+    const volumeSeries = chart.addSeries(
+      HistogramSeries,
+      { priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false },
+      1,
+    )
+    chart.panes()[0].setStretchFactor(3)
+    chart.panes()[1].setStretchFactor(1)
 
     chartRef.current = chart
-    seriesRef.current = series
+    priceSeriesRef.current = priceSeries
+    volumeSeriesRef.current = volumeSeries
+    markersRef.current = createSeriesMarkers(priceSeries, [])
 
-    const handleResize = () => {
-      chart.applyOptions({ width: chartContainerRef.current.clientWidth })
-    }
+    const handleResize = () => chart.applyOptions({ width: containerRef.current.clientWidth })
     window.addEventListener('resize', handleResize)
 
     return () => {
       window.removeEventListener('resize', handleResize)
       chart.remove()
       chartRef.current = null
-      seriesRef.current = null
-      hasFittedRef.current = false
+      priceSeriesRef.current = null
+      volumeSeriesRef.current = null
+      markersRef.current = null
+      appliedRangeRef.current = null
     }
-  }, [backgroundColor, textColor])
+  }, [])
 
   useEffect(() => {
-    if (!seriesRef.current) return
-    seriesRef.current.setData(data)
-    // Only fit once so polling doesn't reset the user's zoom/scroll
-    if (!hasFittedRef.current && data.length > 0) {
-      chartRef.current.timeScale().fitContent()
-      hasFittedRef.current = true
-    }
-  }, [data])
+    if (!priceSeriesRef.current) return
+    priceSeriesRef.current.setData(
+      candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close }))
+    )
+    volumeSeriesRef.current.setData(
+      candles.map(c => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(220, 38, 38, 0.45)' : 'rgba(22, 163, 74, 0.45)',
+      }))
+    )
+    markersRef.current.setMarkers(
+      candles
+        .filter(c => spikeDates?.has(c.time))
+        .map(c => ({ time: c.time, position: 'aboveBar', shape: 'arrowDown', color: '#ea580c', text: '爆量' }))
+    )
+  }, [candles, spikeDates])
 
-  return <div ref={chartContainerRef} />
+  // Apply the range only when it changes (or data first arrives), so polling
+  // doesn't reset the user's zoom and scroll
+  useEffect(() => {
+    if (!chartRef.current || candles.length === 0 || appliedRangeRef.current === rangeDays) return
+    const last = candles[candles.length - 1].time
+    const from = new Date(last)
+    from.setDate(from.getDate() - rangeDays)
+    chartRef.current.timeScale().setVisibleRange({ from: from.toISOString().slice(0, 10), to: last })
+    appliedRangeRef.current = rangeDays
+  }, [candles, rangeDays])
+
+  return <div ref={containerRef} />
 }

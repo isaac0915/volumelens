@@ -84,6 +84,6 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 - `alembic/env.py` — Alembic async config; import new models here so autogenerate detects them
 - `frontend/app/layout.js` + `frontend/components/NavBar.js` / `StockSearch.js` — site shell: sticky nav (首頁 / 爆量雷達), stock search backed by `/api/search` (symbol prefix or name substring, keyboard navigable), max-w-6xl container, data-source footer. UI copy is Traditional Chinese
 - `frontend/app/page.js` — 市場總覽 dashboard: index cards (`/api/market`), watchlist with change % (`/api/stocks`, 3s), and 收盤爆量排行 (`/api/daily-spikes`); shows 盤中 vs 已收盤 from `market_open`
-- `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock detail page with price/volume charts, backed by `/api/stocks/{symbol}/detail`
+- `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock page built on daily candles so every symbol has content: header price/change (live quote if the poller tracks it, else latest close), latest-day stats incl. 20-day average and volume ratio, `CandlestickChart` (lightweight-charts v5: candles + volume pane, 爆量 markers, 1/3/6-month range that doesn't reset on polling), spike-day list (same 2×/500-lot rule as `/api/daily-spikes`, computed client-side), radar alerts, and intraday charts only when `stock_quotes` has data. API candle volume is shares; the page converts to lots
 - `frontend/next.config.mjs` — proxy rewrite from `/api/*` to backend
 - `.env` — credentials (gitignored); see `.env.example`
