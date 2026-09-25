@@ -6,29 +6,28 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal
+from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
 from app.models.volume_alert import VolumeAlert
 from app.services.market_hours import is_market_open
+from app.services.mis_quotes import fetch_volumes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 VOLUME_MULTIPLIER = 2.0
-SCAN_INTERVAL = 60       # seconds between scans
+MIN_VOLUME_LOTS = 500    # ignore thinly traded symbols, where a few lots is already "2x"
+SCAN_INTERVAL = 60       # seconds between the start of each scan
 AVERAGE_DAYS = 20        # trading days in the volume average
 MIN_HISTORY_DAYS = 10    # skip symbols with too little history (e.g. new listings)
 LOOKBACK_DAYS = 45       # calendar-day window to search for those trading days
-MAX_CONCURRENT = 10      # concurrent Fugle API calls during scan
-SHARES_PER_LOT = 1000    # candles store shares; Fugle intraday quotes report lots (張)
+SHARES_PER_LOT = 1000    # candles store shares; intraday quotes report lots (張)
 
 # symbol -> 20-day average daily volume, in lots (張) to match intraday quotes
 volume_averages: dict[str, float] = {}
+# symbol -> "TWSE" / "TPEx", needed to address symbols on the MIS endpoint
+_exchanges: dict[str, str] = {}
 _averages_loaded_on: date | None = None
-
-
-async def _run_in_executor(func):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, func)
 
 
 def _today_taipei() -> date:
@@ -39,7 +38,8 @@ async def _load_volume_averages() -> None:
     """Compute each symbol's average volume over its last 20 trading days from stock_candles.
 
     ROW_NUMBER() numbers each symbol's candles newest-first, so rn <= 20 keeps
-    the latest 20 trading days per symbol regardless of holidays.
+    the latest 20 trading days per symbol regardless of holidays. Joining
+    stocks limits the scan to symbols whose exchange is known.
     """
     global _averages_loaded_on
 
@@ -52,9 +52,10 @@ async def _load_volume_averages() -> None:
         .subquery()
     )
     stmt = (
-        select(recent.c.symbol, func.avg(recent.c.volume).label("avg_volume"))
+        select(recent.c.symbol, Stock.exchange, func.avg(recent.c.volume).label("avg_volume"))
+        .join(Stock, Stock.symbol == recent.c.symbol)
         .where(recent.c.rn <= AVERAGE_DAYS)
-        .group_by(recent.c.symbol)
+        .group_by(recent.c.symbol, Stock.exchange)
         .having(func.count() >= MIN_HISTORY_DAYS)
     )
 
@@ -62,73 +63,69 @@ async def _load_volume_averages() -> None:
         rows = (await session.execute(stmt)).all()
 
     volume_averages.clear()
-    for symbol, avg_shares in rows:
+    _exchanges.clear()
+    for symbol, exchange, avg_shares in rows:
         if avg_shares:
             volume_averages[symbol] = float(avg_shares) / SHARES_PER_LOT
+            _exchanges[symbol] = exchange
     _averages_loaded_on = _today_taipei()
     logger.info(f"[radar] Averages loaded from DB for {len(volume_averages)} symbols")
 
 
-async def _scan_once(client) -> None:
+async def _scan_once() -> None:
     if not volume_averages:
         return
 
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-    alerts: list[tuple] = []
-    failures = 0
+    quotes, failed_batches = await fetch_volumes(_exchanges, _today_taipei())
+    logger.info(
+        f"[radar] Scanned {len(quotes)}/{len(volume_averages)} symbols"
+        + (f" ({failed_batches} batches failed)" if failed_batches else "")
+    )
 
-    async def check_symbol(symbol: str, avg: float):
-        nonlocal failures
-        async with semaphore:
-            try:
-                quote = await _run_in_executor(
-                    lambda s=symbol: client.stock.intraday.quote(symbol=s)
-                )
-                current_vol = quote.get("total", {}).get("tradeVolume", 0)
-                if current_vol and current_vol > VOLUME_MULTIPLIER * avg:
-                    alerts.append((
-                        symbol,
-                        quote.get("name", ""),
-                        current_vol,
-                        avg,
-                        current_vol / avg,
-                    ))
-            except Exception:
-                failures += 1  # usually HTTP 429; counted so gaps in coverage are visible
+    alerts = [
+        (symbol, name, volume, volume_averages[symbol], volume / volume_averages[symbol])
+        for symbol, (name, volume) in quotes.items()
+        if symbol in volume_averages
+        and volume >= MIN_VOLUME_LOTS
+        and volume > VOLUME_MULTIPLIER * volume_averages[symbol]
+    ]
+    if not alerts:
+        return
 
-    await asyncio.gather(*[check_symbol(s, a) for s, a in volume_averages.items()])
-    if failures:
-        logger.warning(f"[radar] {failures}/{len(volume_averages)} quotes failed this scan")
-
-    if alerts:
-        alerts.sort(key=lambda x: -x[4])
-        logger.info(f"[radar] === ABNORMAL VOLUME: {len(alerts)} stocks ===")
-        async with AsyncSessionLocal() as session:
-            for symbol, name, vol, avg, ratio in alerts:
-                logger.info(f"[radar]  {symbol} {name:12s}  volume {vol:>10,}  ({ratio:.1f}x avg {avg:>10,.0f})")
-                session.add(VolumeAlert(
-                    symbol=symbol,
-                    name=name,
-                    current_volume=vol,
-                    average_volume=avg,
-                    ratio=ratio,
-                    detected_at=datetime.utcnow(),
-                ))
-            await session.commit()
-    else:
-        logger.info("[radar] Scan complete — no abnormal volume detected")
+    alerts.sort(key=lambda x: -x[4])
+    logger.info(f"[radar] === ABNORMAL VOLUME: {len(alerts)} stocks ===")
+    async with AsyncSessionLocal() as session:
+        for symbol, name, vol, avg, ratio in alerts:
+            logger.info(f"[radar]  {symbol} {name:12s}  volume {vol:>10,}  ({ratio:.1f}x avg {avg:>10,.0f})")
+            session.add(VolumeAlert(
+                symbol=symbol,
+                name=name,
+                current_volume=vol,
+                average_volume=avg,
+                ratio=ratio,
+                detected_at=datetime.utcnow(),
+            ))
+        await session.commit()
 
 
-async def run_radar(client) -> None:
+async def run_radar() -> None:
     while True:
-        # Only hit Fugle during market hours: quotes don't change after close.
+        # Only scan during market hours: volumes don't change after close.
         if not is_market_open():
             await asyncio.sleep(SCAN_INTERVAL)
             continue
+
+        started = asyncio.get_running_loop().time()
 
         # Reload once per trading day so new daily candles are picked up
         if _averages_loaded_on != _today_taipei():
             await _load_volume_averages()
 
-        await _scan_once(client)
-        await asyncio.sleep(SCAN_INTERVAL)
+        try:
+            await _scan_once()
+        except Exception:
+            logger.exception("[radar] scan failed")
+
+        # A scan takes ~70s, so the next one usually starts right away
+        elapsed = asyncio.get_running_loop().time() - started
+        await asyncio.sleep(max(0, SCAN_INTERVAL - elapsed))

@@ -10,6 +10,7 @@ from app.core.config import settings
 import app.models.stock_quote  # noqa: F401 — registers models with Base
 import app.models.volume_alert  # noqa: F401
 import app.models.stock_candle  # noqa: F401
+import app.models.stock  # noqa: F401
 from app.core.database import Base
 
 config = context.config

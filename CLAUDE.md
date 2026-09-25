@@ -51,7 +51,7 @@ On startup, `lifespan` in `main.py` launches three asyncio background tasks: `po
 `next.config.mjs` rewrites all `/api/*` requests to `http://localhost:8000/api/*`, so the frontend calls `/api/stocks` and the backend receives it — both must be running simultaneously.
 
 **Radar scanner (`app/services/radar.py`):**
-A full-market scanner started as a second `asyncio.create_task` in `main.py`'s `lifespan`. It only runs during market hours (`is_market_open()` in `app/services/market_hours.py`, shared with the poller). Once per trading day it loads each symbol's 20-trading-day average volume from `stock_candles` with a `ROW_NUMBER()` window query (~0.2s, ~2,300 TWSE+TPEx symbols; symbols with <10 days of history are skipped), then every 60 seconds fetches a Fugle intraday quote per symbol (up to 10 concurrent) and persists spikes (2× average) as `VolumeAlert` rows. Units: candles store **shares**, Fugle intraday `tradeVolume` is **lots (張)**, so averages are divided by 1,000 before comparing; `VolumeAlert` volumes are in lots. Failed quotes (usually 429s) are counted and logged per scan.
+A full-market scanner started as a second `asyncio.create_task` in `main.py`'s `lifespan`. It only runs during market hours (`is_market_open()` in `app/services/market_hours.py`, shared with the poller). Once per trading day it loads each symbol's 20-trading-day average volume from `stock_candles` with a `ROW_NUMBER()` window query joined to `stocks` for the exchange (~0.2s, ~2,300 TWSE+TPEx symbols; <10 days of history skipped). Each scan then fetches cumulative intraday volume from TWSE's undocumented MIS endpoint (`app/services/mis_quotes.py`: 100 symbols per request — more returns rtcode 9999 — spaced 2s apart, ~24 requests / ~70s per full scan; quotes not dated today are dropped) and persists spikes (≥2× average and ≥500 lots) as `VolumeAlert` rows. Fugle's per-symbol quotes can't cover the market within rate limits and its batch `snapshot` endpoints are Forbidden on the current plan, so Fugle is only used by the poller. Units: candles store **shares**, intraday volumes are **lots (張)**, so averages are divided by 1,000; `VolumeAlert` volumes are in lots.
 
 **Stock candles / backfill (`app/models/stock_candle.py`, `app/script/backfill_candles.py`):**
 `StockCandle` stores daily OHLCV + turnover/change per symbol (unique on `symbol`+`date`; `volume` is `BigInteger` since some ETFs trade >2.1B shares/day). `backfill_candles.py` is a standalone script (not run by the API) that pulls daily candles from Fugle for the whole market (or `--symbols`) over the last `--days` (default 180) and inserts them with `ON CONFLICT DO NOTHING`, committing per symbol and retrying on HTTP 429 — safe to re-run. Test with `--limit 5`: `docker compose exec api python -m app.script.backfill_candles --limit 5`.
@@ -69,11 +69,13 @@ Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by
 
 - `app/main.py` — FastAPI entry point; `lifespan` starts the stock poller and radar scanner; all HTTP routes (`/api/stocks`, `/api/alerts`, `/api/stocks/{symbol}/detail`)
 - `app/services/stock_poller.py` — background poller; edit `WATCHED_SYMBOLS` to change tracked stocks
-- `app/services/radar.py` — full-market volume spike scanner; 20-day averages from `stock_candles`, intraday volume from Fugle; persists spikes to `VolumeAlert`
+- `app/services/radar.py` — full-market volume spike scanner; 20-day averages from `stock_candles`, intraday volume from TWSE MIS; persists spikes to `VolumeAlert`
+- `app/services/mis_quotes.py` — batched intraday volume from TWSE's MIS endpoint (TWSE + TPEx symbols)
 - `app/services/market_hours.py` — `is_market_open()` (Mon–Fri 09:00–13:30 Asia/Taipei, bypassed by `FORCE_POLL`); used by poller and radar
 - `app/services/volume_detection.py` — `is_volume_spike()` utility
 - `app/models/stock_quote.py` — `StockQuote` ORM model; add new models by subclassing `Base` from `app.core.database`
 - `app/models/volume_alert.py` — `VolumeAlert` ORM model, persisted by the radar scanner
+- `app/models/stock.py` — `Stock` (symbol → name, exchange TWSE/TPEx), upserted by the daily sync; `ensure_stock_list()` fills it if empty
 - `app/models/stock_candle.py` — `StockCandle` ORM model (daily OHLCV), populated only via the backfill script
 - `app/services/daily_sync.py` — `run_daily_sync()` background task + `sync_range()` shared with the backfill script
 - `app/services/exchange_daily.py` — fetch/clean one day of whole-market candles from TWSE + TPEx

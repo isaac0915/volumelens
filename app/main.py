@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.stock_quote import StockQuote
 from app.models.volume_alert import VolumeAlert
+from app.models.stock import Stock
 from app.models.stock_candle import StockCandle
 from app.services.stock_poller import get_average_volume, poll_stocks, stock_cache
 from app.services.daily_sync import run_daily_sync
@@ -22,7 +23,7 @@ fugle_client = RestClient(api_key=settings.fugle_api_key)
 async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(poll_stocks(fugle_client)),
-        asyncio.create_task(run_radar(fugle_client)),
+        asyncio.create_task(run_radar()),
         asyncio.create_task(run_daily_sync()),
     ]
     yield
@@ -115,6 +116,8 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
         )
         daily_candles = daily_candles_result.scalars().all()
 
+        stock = await session.get(Stock, symbol)
+
     if not history and not alerts and not daily_candles and symbol not in stock_cache:
         raise HTTPException(status_code=404, detail=f"No data found for symbol {symbol}")
 
@@ -123,6 +126,8 @@ async def get_stock_detail(symbol: str, limit: int = Query(default=100, ge=1, le
     return {
         "status": "success",
         "data": {
+            "name": stock.name if stock else None,
+            "exchange": stock.exchange if stock else None,
             "current": stock_cache.get(symbol),
             "average_volume_5d": avg_volume,
             "history": [

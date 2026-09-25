@@ -6,7 +6,8 @@ blocks IPs that send more than a few requests per 5 seconds) and the format can
 change without notice.
 
 Volume is in shares and turnover in NTD for both exchanges, matching Fugle's
-historical candles.
+historical candles. Each row also carries "name" and "exchange", which aren't
+StockCandle columns; callers split them off into the stocks table.
 """
 import logging
 import re
@@ -57,12 +58,14 @@ def _num(value: str) -> float | None:
         return None
 
 
-def _candle(symbol, day, open_, high, low, close, volume, turnover, change) -> dict | None:
+def _candle(symbol, name, exchange, day, open_, high, low, close, volume, turnover, change) -> dict | None:
     prices = [_num(v) for v in (open_, high, low, close)]
     if any(p is None for p in prices):
         return None  # no trades that day
     return {
         "symbol": symbol,
+        "name": name.strip(),
+        "exchange": exchange,
         "date": day,
         "open": prices[0],
         "high": prices[1],
@@ -97,7 +100,7 @@ def fetch_twse_day(day: date) -> list[dict]:
         magnitude = _num(row[f["漲跌價差"]]) or 0.0
         sign = -1 if "-" in row[f["漲跌(+/-)"]] else 1
         candle = _candle(
-            symbol, day,
+            symbol, row[f["證券名稱"]], "TWSE", day,
             row[f["開盤價"]], row[f["最高價"]], row[f["最低價"]], row[f["收盤價"]],
             row[f["成交股數"]], row[f["成交金額"]],
             sign * magnitude,
@@ -124,7 +127,7 @@ def fetch_tpex_day(day: date) -> list[dict]:
         if not is_tracked_symbol(symbol):
             continue
         candle = _candle(
-            symbol, day,
+            symbol, row[f["名稱"]], "TPEx", day,
             row[f["開盤"]], row[f["最高"]], row[f["最低"]], row[f["收盤"]],
             row[f["成交股數"]], row[f["成交金額(元)"]],
             _num(row[f["漲跌"]]) or 0.0,  # e.g. '+0.10', '-0.03 '

@@ -59,7 +59,7 @@ export default function StockDetailPage() {
       <Link href="/" className="text-sm text-blue-600 hover:underline">← 台股監控</Link>
 
       <div className="flex items-baseline gap-3 mt-4 mb-6 flex-wrap">
-        <h1 className="text-3xl font-bold text-gray-900">{detail?.current?.name ?? detail?.alerts?.[0]?.name ?? symbol}</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{detail?.current?.name ?? detail?.name ?? symbol}</h1>
         <span className="text-lg text-gray-400">{symbol}</span>
         {detail?.current && (
           <span className="text-2xl font-semibold text-gray-900 ml-auto tabular-nums">
