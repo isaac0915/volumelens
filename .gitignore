@@ -21,6 +21,7 @@ build/
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Docker
 postgres_data/
