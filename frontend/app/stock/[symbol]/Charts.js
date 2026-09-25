@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { formatTime } from '@/lib/format'
+import { formatLots, formatTime } from '@/lib/format'
+import { useColorConvention } from '@/components/ColorConvention'
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, HistogramSeries } from 'lightweight-charts'
 
 const CHART_THEME_CSS = `
@@ -63,7 +64,7 @@ export function PriceLineChart({ points }) {
   const height = 260
 
   if (points.length === 0) {
-    return <p className="text-sm text-gray-400">尚無盤中價格資料。</p>
+    return <p className="text-sm text-gray-400">No intraday prices yet.</p>
   }
 
   const plotWidth = Math.max(width - MARGIN.left - MARGIN.right, 0)
@@ -188,7 +189,7 @@ export function VolumeBarChart({ points }) {
   const height = 140
 
   if (points.length === 0) {
-    return <p className="text-sm text-gray-400">尚無盤中成交量資料。</p>
+    return <p className="text-sm text-gray-400">No intraday volume yet.</p>
   }
 
   const plotWidth = Math.max(width - MARGIN.left - MARGIN.right, 0)
@@ -222,7 +223,7 @@ export function VolumeBarChart({ points }) {
           >
             <line x1={MARGIN.left} x2={width - MARGIN.right} y1={baseY} y2={baseY} stroke="var(--baseline)" strokeWidth={1} />
             <text x={MARGIN.left - 8} y={MARGIN.top} textAnchor="end" dominantBaseline="hanging" fontSize={11} fill="var(--text-muted)">
-              {maxVolume.toLocaleString()}
+              {formatLots(maxVolume)}
             </text>
 
             {points.map((p, i) => {
@@ -249,7 +250,7 @@ export function VolumeBarChart({ points }) {
               top: 8,
             }}
           >
-            <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{hovered.volume.toLocaleString()}</p>
+            <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{formatLots(hovered.volume)}</p>
             <p style={{ color: 'var(--text-secondary)' }}>{formatTime(hovered.time)}</p>
           </div>
         )}
@@ -259,13 +260,11 @@ export function VolumeBarChart({ points }) {
 }
 
 
-const UP_COLOR = '#dc2626'   // Taiwan convention: red = up
-const DOWN_COLOR = '#16a34a' // green = down
-
 // candles: [{ time, open, high, low, close, volume }] ascending by time (volume in lots)
-// spikeDates: Set of dates to mark as volume spikes
+// spikeRatios: Map of date -> relative volume for days to mark as unusual volume
 // rangeDays: how many calendar days to show, counted back from the latest candle
-export function CandlestickChart({ candles, spikeDates, rangeDays }) {
+export function CandlestickChart({ candles, spikeRatios, rangeDays }) {
+  const { up, down } = useColorConvention()
   const containerRef = useRef()
   const chartRef = useRef(null)
   const priceSeriesRef = useRef(null)
@@ -284,18 +283,12 @@ export function CandlestickChart({ candles, spikeDates, rangeDays }) {
       grid: { vertLines: { color: '#f3f4f6' }, horzLines: { color: '#f3f4f6' } },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false },
-      localization: { locale: 'zh-TW' },
+      localization: { locale: 'en-US' },
       width: containerRef.current.clientWidth,
       height: 420,
     })
 
-    const priceSeries = chart.addSeries(CandlestickSeries, {
-      upColor: UP_COLOR,
-      downColor: DOWN_COLOR,
-      borderVisible: false,
-      wickUpColor: UP_COLOR,
-      wickDownColor: DOWN_COLOR,
-    })
+    const priceSeries = chart.addSeries(CandlestickSeries, { borderVisible: false })
     // Volume lives in its own pane below the candles, sharing the time axis
     const volumeSeries = chart.addSeries(
       HistogramSeries,
@@ -324,6 +317,11 @@ export function CandlestickChart({ candles, spikeDates, rangeDays }) {
     }
   }, [])
 
+  // Up/down colors follow the US/Taiwan toggle
+  useEffect(() => {
+    priceSeriesRef.current?.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down })
+  }, [up, down])
+
   useEffect(() => {
     if (!priceSeriesRef.current) return
     priceSeriesRef.current.setData(
@@ -332,16 +330,19 @@ export function CandlestickChart({ candles, spikeDates, rangeDays }) {
     volumeSeriesRef.current.setData(
       candles.map(c => ({
         time: c.time,
-        value: c.volume,
-        color: c.close >= c.open ? 'rgba(220, 38, 38, 0.45)' : 'rgba(22, 163, 74, 0.45)',
+        value: c.volume * 1000, // lots -> shares, to match the rest of the UI
+        color: `${c.close >= c.open ? up : down}73`, // ~45% opacity
       }))
     )
     markersRef.current.setMarkers(
       candles
-        .filter(c => spikeDates?.has(c.time))
-        .map(c => ({ time: c.time, position: 'aboveBar', shape: 'arrowDown', color: '#ea580c', text: '爆量' }))
+        .filter(c => spikeRatios?.has(c.time))
+        .map(c => ({
+          time: c.time, position: 'aboveBar', shape: 'arrowDown', color: '#ea580c',
+          text: `${spikeRatios.get(c.time).toFixed(1)}×`,
+        }))
     )
-  }, [candles, spikeDates])
+  }, [candles, spikeRatios, up, down])
 
   // Apply the range only when it changes (or data first arrives), so polling
   // doesn't reset the user's zoom and scroll

@@ -1,1 +1,24 @@
 @import "tailwindcss";
+
+/* Price-direction colors. US convention by default (green = up); the color
+   toggle sets data-colors="tw" on <html> for the Taiwan convention (red = up).
+   Use text-up / text-down / bg-up-soft / bg-down-soft instead of red/green. */
+@theme {
+  --color-up: #16a34a;
+  --color-down: #dc2626;
+  --color-up-soft: #f0fdf4;
+  --color-down-soft: #fef2f2;
+}
+
+:root[data-colors="tw"] {
+  --color-up: #dc2626;
+  --color-down: #16a34a;
+  --color-up-soft: #fef2f2;
+  --color-down-soft: #f0fdf4;
+}
+
+/* Geist for Latin text (loaded in layout.js); Chinese stock names fall back to the system font */
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}

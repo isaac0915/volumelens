@@ -82,13 +82,13 @@ export default function StockSearch() {
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder="搜尋代號或名稱，例如 2330、台積電"
-        aria-label="搜尋股票"
+        placeholder="Search symbol or name, e.g. 2330"
+        aria-label="Search stocks"
         className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
       />
       {visible && (
         <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
-          {results.length === 0 && <li className="px-3 py-2 text-sm text-gray-400">找不到符合的股票</li>}
+          {results.length === 0 && <li className="px-3 py-2 text-sm text-gray-400">No matching stocks</li>}
           {results.map((stock, i) => (
             <li key={stock.symbol}>
               <button
@@ -100,7 +100,7 @@ export default function StockSearch() {
               >
                 <span className="w-14 font-semibold tabular-nums text-gray-900">{stock.symbol}</span>
                 <span className="flex-1 truncate text-gray-700">{stock.name}</span>
-                <span className="text-xs text-gray-400">{stock.exchange === 'TWSE' ? '上市' : '上櫃'}</span>
+                <span className="text-xs text-gray-400">{stock.exchange}</span>
               </button>
             </li>
           ))}

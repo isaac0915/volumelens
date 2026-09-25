@@ -62,6 +62,12 @@ Historical daily candles come from the TWSE (`MI_INDEX`) and TPEx (`dailyQuotes`
 **Database layer (`app/core/database.py`):**
 Async SQLAlchemy engine using `asyncpg`. `AsyncSessionLocal` is used directly by background services. `get_db()` is the async dependency for FastAPI routes. Alembic uses an async engine (`alembic/env.py`); new models must be imported there (with `# noqa: F401`) so autogenerate can detect them.
 
+**Frontend conventions (VolumeLens):**
+- Terminology: "unusual volume" and relative volume (RVOL = volume / 20-day average), not 爆量/量比.
+- Volume: APIs report lots (張, 1,000 shares) except `daily_candles` (shares); display shares via `formatLots()` in `frontend/lib/format.js` (e.g. "7.95M").
+- Price direction colors: never hard-code red/green. Use `text-up` / `text-down` / `bg-up-soft` / `bg-down-soft` (CSS variables in `globals.css`) and `toneOf()`; JS consumers (charts) read `useColorConvention()` from `components/ColorConvention.js`. Default is US (green = up); the nav toggle switches to Taiwan (red = up), persisted in localStorage via `useSyncExternalStore`. RVOL severity uses amber/orange (`rvolStyle()`), not red/green.
+- Dates from the API are Taipei trading days; format with `formatDate()` (UTC-pinned so the viewer's timezone can't shift the day).
+
 **Time handling:**
 DB `DateTime` columns (`stock_quotes.recorded_at`, `volume_alerts.detected_at`) store **naive UTC**. API responses must serialize them with `.replace(tzinfo=timezone.utc).isoformat()` (or use `datetime.now(timezone.utc)`), otherwise browsers read the string as the viewer's local time. The frontend formats all times in `Asia/Taipei` (`frontend/lib/format.js`) regardless of viewer timezone. Trading-day logic (market hours, "today", sync cutoffs) uses Asia/Taipei; the container clock is UTC. In SQL, `timezone('Asia/Taipei', timezone('UTC', col))` converts a naive-UTC column to Taipei wall time (used by the detail endpoint to pick the latest 09:00–13:30 session, returned as one quote per minute).
 
@@ -84,7 +90,7 @@ DB `DateTime` columns (`stock_quotes.recorded_at`, `volume_alerts.detected_at`) 
 - `app/script/backfill_market.py` — whole-market daily backfill by date (TWSE + TPEx); preferred over `backfill_candles.py`
 - `app/script/backfill_candles.py` — per-symbol Fugle backfill (e.g. `--symbols 2330`); not run by the API
 - `alembic/env.py` — Alembic async config; import new models here so autogenerate detects them
-- `frontend/app/layout.js` + `frontend/components/NavBar.js` / `StockSearch.js` — site shell: sticky nav (首頁 / 爆量雷達), stock search backed by `/api/search` (symbol prefix or name substring, keyboard navigable), max-w-6xl container, data-source footer. UI copy is Traditional Chinese
+- `frontend/app/layout.js` + `frontend/components/NavBar.js` / `StockSearch.js` — site shell: sticky nav (首頁 / 爆量雷達), stock search backed by `/api/search` (symbol prefix or name substring, keyboard navigable), max-w-6xl container, data-source footer. UI copy is English (audience: US reviewers); stock names stay Chinese
 - `frontend/app/page.js` — 市場總覽 dashboard: index cards (`/api/market`), watchlist with change % (`/api/stocks`, 3s), and 收盤爆量排行 (`/api/daily-spikes`); shows 盤中 vs 已收盤 from `market_open`
 - `frontend/app/stock/[symbol]/page.js` + `Charts.js` — per-stock page built on daily candles so every symbol has content: header price/change (live quote if the poller tracks it, else latest close), latest-day stats incl. 20-day average and volume ratio, `CandlestickChart` (lightweight-charts v5: candles + volume pane, 爆量 markers, 1/3/6-month range that doesn't reset on polling), spike-day list (same 2×/500-lot rule as `/api/daily-spikes`, computed client-side), radar alerts, and intraday charts only when `stock_quotes` has data. API candle volume is shares; the page converts to lots
 - `frontend/next.config.mjs` — proxy rewrite from `/api/*` to backend

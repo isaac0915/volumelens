@@ -2,37 +2,20 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { formatTime, formatDateTime } from '@/lib/format'
+import { formatDate, formatDateTime, formatLots, formatPct, formatTime, rvolStyle, toneOf } from '@/lib/format'
 import { ChartTheme, PriceLineChart, VolumeBarChart, CandlestickChart } from './Charts'
 
 const RANGES = [
-  { days: 30, label: '1 個月' },
-  { days: 90, label: '3 個月' },
-  { days: 180, label: '6 個月' },
+  { days: 30, label: '1M' },
+  { days: 90, label: '3M' },
+  { days: 180, label: '6M' },
 ]
 // Same definition as the backend's /api/daily-spikes
 const SPIKE_MULTIPLIER = 2
 const SPIKE_MIN_LOTS = 500
 const AVERAGE_DAYS = 20
 
-// Taiwan convention: red = up, green = down
-function toneOf(change) {
-  if (change > 0) return { text: 'text-red-600', arrow: '▲' }
-  if (change < 0) return { text: 'text-green-600', arrow: '▼' }
-  return { text: 'text-gray-900', arrow: '–' }
-}
-
-function formatPct(pct) {
-  return `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`
-}
-
-// "2026-09-24" -> "9/24"
-function formatShortDate(isoDate) {
-  const [, m, d] = isoDate.split('-').map(Number)
-  return `${m}/${d}`
-}
-
-// Each candle's volume vs the average of its previous 20 trading days
+// Each candle's volume vs the average of its previous 20 trading days (relative volume)
 function withVolumeRatios(candles) {
   return candles.map((c, i) => {
     const prev = candles.slice(Math.max(0, i - AVERAGE_DAYS), i)
@@ -74,7 +57,7 @@ export default function StockDetailPage() {
     const fetchDetail = () => {
       fetch(`/api/stocks/${symbol}/detail`)
         .then(res => {
-          if (!res.ok) throw new Error(res.status === 404 ? '找不到這檔股票' : `Request failed: ${res.status}`)
+          if (!res.ok) throw new Error(res.status === 404 ? 'stock not found' : `Request failed: ${res.status}`)
           return res.json()
         })
         .then(data => {
@@ -96,7 +79,8 @@ export default function StockDetailPage() {
     }
   }, [symbol])
 
-  // The API returns candle volume in shares; the UI works in lots (張)
+  // The API returns candle volume in shares; the page works in lots (1 lot = 1,000 shares)
+  // like the rest of the API, and formatLots() renders shares
   const candles = useMemo(
     () => withVolumeRatios((detail?.daily_candles ?? []).map(c => ({
       time: c.date, open: c.open, high: c.high, low: c.low, close: c.close,
@@ -108,7 +92,8 @@ export default function StockDetailPage() {
     () => candles.filter(c => c.ratio >= SPIKE_MULTIPLIER && c.volume >= SPIKE_MIN_LOTS),
     [candles],
   )
-  const spikeDates = useMemo(() => new Set(spikes.map(c => c.time)), [spikes])
+  // date -> RVOL, for chart markers
+  const spikeRatios = useMemo(() => new Map(spikes.map(c => [c.time, c.ratio])), [spikes])
 
   const latest = candles[candles.length - 1]
   const live = detail?.current
@@ -126,8 +111,8 @@ export default function StockDetailPage() {
   const pct = prevClose ? (change / prevClose) * 100 : 0
   const tone = toneOf(change)
   const asOf = live
-    ? `盤中即時 · ${formatTime(live.updated_at)}`
-    : latest ? `${formatShortDate(latest.time)} 收盤` : null
+    ? `Live · ${formatTime(live.updated_at)} Taipei`
+    : latest ? `Close · ${formatDate(latest.time, { weekday: 'short', month: 'short', day: 'numeric' })}` : null
 
   const cutoff = latest ? new Date(latest.time) : null
   cutoff?.setDate(cutoff.getDate() - rangeDays)
@@ -137,7 +122,6 @@ export default function StockDetailPage() {
   const recentSpikes = spikes.filter(c => cutoff && new Date(c.time) >= cutoff).reverse()
 
   const name = live?.name ?? detail?.name ?? symbol
-  const exchange = detail?.exchange === 'TWSE' ? '上市' : detail?.exchange === 'TPEx' ? '上櫃' : null
 
   return (
     <div className="space-y-6">
@@ -148,7 +132,9 @@ export default function StockDetailPage() {
           <div className="flex flex-wrap items-baseline gap-2">
             <h1 className="text-3xl font-bold text-gray-900">{name}</h1>
             <span className="text-lg text-gray-400">{symbol}</span>
-            {exchange && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">{exchange}</span>}
+            {detail?.exchange && (
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">{detail.exchange}</span>
+            )}
           </div>
           {asOf && <p className="mt-1 text-sm text-gray-400">{asOf}</p>}
         </div>
@@ -156,7 +142,7 @@ export default function StockDetailPage() {
           <div className="text-right">
             <p className={`text-4xl font-semibold tabular-nums ${tone.text}`}>{price.toFixed(2)}</p>
             <p className={`mt-1 text-sm font-medium tabular-nums ${tone.text}`}>
-              {tone.arrow} {Math.abs(change).toFixed(2)}（{formatPct(pct)}）
+              {tone.arrow} {Math.abs(change).toFixed(2)} ({formatPct(pct)})
             </p>
           </div>
         )}
@@ -164,23 +150,23 @@ export default function StockDetailPage() {
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          無法載入股票資料（{error}）。
+          Couldn&apos;t load this stock ({error}).
         </div>
       )}
 
-      {!error && !detail && <p className="text-sm text-gray-500">載入中…</p>}
+      {!error && !detail && <p className="text-sm text-gray-500">Loading…</p>}
 
       {detail && (
         <>
           {latest && (
-            <div className="grid grid-cols-3 gap-x-4 gap-y-4 rounded-xl border border-gray-200 bg-white px-5 py-4 sm:grid-cols-6">
-              <Stat label="開盤" value={latest.open.toFixed(2)} />
-              <Stat label="最高" value={latest.high.toFixed(2)} className="text-red-600" />
-              <Stat label="最低" value={latest.low.toFixed(2)} className="text-green-600" />
-              <Stat label="成交量（張）" value={latest.volume.toLocaleString()} />
-              <Stat label="20 日均量（張）" value={latest.avgVolume ? Math.round(latest.avgVolume).toLocaleString() : '–'} />
+            <div className="grid grid-cols-3 gap-4 rounded-xl border border-gray-200 bg-white px-5 py-4 sm:grid-cols-6">
+              <Stat label="Open" value={latest.open.toFixed(2)} />
+              <Stat label="High" value={latest.high.toFixed(2)} />
+              <Stat label="Low" value={latest.low.toFixed(2)} />
+              <Stat label="Volume" value={formatLots(latest.volume)} />
+              <Stat label="Avg Vol (20D)" value={latest.avgVolume ? formatLots(latest.avgVolume) : '–'} />
               <Stat
-                label="量比"
+                label="Rel. Volume"
                 value={latest.ratio ? `${latest.ratio.toFixed(2)}×` : '–'}
                 className={latest.ratio >= SPIKE_MULTIPLIER ? 'text-orange-600' : ''}
               />
@@ -188,12 +174,13 @@ export default function StockDetailPage() {
           )}
 
           <Card
-            title="日 K 線"
+            title="Daily Price & Volume"
             action={
               <div className="flex gap-1">
                 {RANGES.map(r => (
                   <button
                     key={r.days}
+                    type="button"
                     onClick={() => setRangeDays(r.days)}
                     className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
                       rangeDays === r.days ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
@@ -207,33 +194,37 @@ export default function StockDetailPage() {
           >
             {candles.length > 0 ? (
               <>
-                <CandlestickChart candles={candles} spikeDates={spikeDates} rangeDays={rangeDays} />
+                <CandlestickChart candles={candles} spikeRatios={spikeRatios} rangeDays={rangeDays} />
                 <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500">
-                  <span>區間最高 <span className="font-medium tabular-nums text-red-600">{rangeHigh?.toFixed(2)}</span></span>
-                  <span>區間最低 <span className="font-medium tabular-nums text-green-600">{rangeLow?.toFixed(2)}</span></span>
-                  <span>區間爆量 <span className="font-medium tabular-nums text-orange-600">{recentSpikes.length}</span> 天</span>
-                  <span className="text-gray-400">▼爆量：成交量達前 20 日均量 {SPIKE_MULTIPLIER} 倍且至少 {SPIKE_MIN_LOTS} 張</span>
+                  <span>Period high <span className="font-medium tabular-nums text-gray-900">{rangeHigh?.toFixed(2)}</span></span>
+                  <span>Period low <span className="font-medium tabular-nums text-gray-900">{rangeLow?.toFixed(2)}</span></span>
+                  <span>Unusual volume days <span className="font-medium tabular-nums text-orange-600">{recentSpikes.length}</span></span>
+                  <span className="text-gray-400">
+                    <span className="text-orange-600">▼</span> RVOL ≥ {SPIKE_MULTIPLIER}× the 20-day average and ≥ 500K shares
+                  </span>
                 </div>
               </>
             ) : (
-              <p className="text-sm text-gray-400">尚無日 K 資料。</p>
+              <p className="text-sm text-gray-400">No daily data yet.</p>
             )}
           </Card>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Card title="區間爆量日">
-              {recentSpikes.length === 0 && <p className="text-sm text-gray-400">這段期間沒有爆量。</p>}
+            <Card title="Unusual Volume Days">
+              {recentSpikes.length === 0 && <p className="text-sm text-gray-400">None in this period.</p>}
               {recentSpikes.length > 0 && (
                 <ul className="divide-y divide-gray-100">
                   {recentSpikes.map(c => {
                     const t = toneOf(c.change)
                     const prev = c.close - c.change
                     return (
-                      <li key={c.time} className="flex items-center justify-between gap-3 py-2 text-sm">
-                        <span className="text-gray-600 tabular-nums">{c.time}</span>
-                        <span className="text-gray-500 tabular-nums">{c.volume.toLocaleString()} 張</span>
-                        <span className={`tabular-nums ${t.text}`}>{prev ? formatPct((c.change / prev) * 100) : ''}</span>
-                        <span className="rounded-full bg-orange-50 px-2 py-0.5 font-semibold tabular-nums text-orange-700">
+                      <li key={c.time} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 py-2 text-sm">
+                        <span className="tabular-nums text-gray-600">
+                          {formatDate(c.time, { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                        <span className="tabular-nums text-gray-500">{formatLots(c.volume)}</span>
+                        <span className={`w-16 text-right tabular-nums ${t.text}`}>{prev ? formatPct((c.change / prev) * 100) : ''}</span>
+                        <span className={`w-14 rounded-full px-2 py-0.5 text-center font-semibold tabular-nums ${rvolStyle(c.ratio)}`}>
                           {c.ratio.toFixed(1)}×
                         </span>
                       </li>
@@ -243,14 +234,16 @@ export default function StockDetailPage() {
               )}
             </Card>
 
-            <Card title="盤中爆量紀錄">
-              {detail.alerts.length === 0 && <p className="text-sm text-gray-400">雷達近期沒有在盤中偵測到爆量。</p>}
+            <Card title="Intraday Scanner Alerts">
+              {detail.alerts.length === 0 && (
+                <p className="text-sm text-gray-400">The intraday scanner hasn&apos;t flagged this stock recently.</p>
+              )}
               {detail.alerts.length > 0 && (
                 <ul className="divide-y divide-gray-100">
                   {detail.alerts.map((a, i) => (
                     <li key={i} className="flex justify-between py-2 text-sm text-gray-600">
-                      <span className="tabular-nums">{formatDateTime(a.detected_at)}</span>
-                      <span className="font-medium text-orange-600">{a.ratio.toFixed(1)} 倍均量</span>
+                      <span className="tabular-nums">{formatDateTime(a.detected_at)} Taipei</span>
+                      <span className="font-medium text-orange-600">{a.ratio.toFixed(1)}× RVOL</span>
                     </li>
                   ))}
                 </ul>
@@ -259,7 +252,7 @@ export default function StockDetailPage() {
           </div>
 
           {showIntraday && (
-            <Card title={`盤中走勢 · ${formatShortDate(detail.session_date)}`}>
+            <Card title={`Intraday · ${formatDate(detail.session_date)}`}>
               <div className="space-y-6">
                 <PriceLineChart points={points} />
                 <VolumeBarChart points={points} />
