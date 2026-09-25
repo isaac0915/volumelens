@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { formatDate, formatLots, formatPct, formatTime, rvolStyle, toneOf } from '@/lib/format'
 
 const INDEX_NAMES = { TAIEX: 'TAIEX', TPEX: 'TPEx Index' }
+const REPO_URL = 'https://github.com/isaac0915/stock_tracker'
 
 const STOCKS_POLL_MS = 3000
 const MARKET_POLL_MS = 15000
@@ -53,6 +54,60 @@ function Card({ title, subtitle, action, children, className = '' }) {
         </div>
       )}
       {children}
+    </section>
+  )
+}
+
+function HeroStat({ label, value }) {
+  return (
+    <div>
+      <dt className="text-xs text-gray-400">{label}</dt>
+      <dd className="mt-1 text-2xl font-semibold tabular-nums text-white sm:text-3xl">{value ?? '–'}</dd>
+    </div>
+  )
+}
+
+// Explains the product at a glance for first-time visitors
+function Hero({ status, market, spikes }) {
+  const session = market?.latest_session ? formatDate(market.latest_session) : null
+  return (
+    <section className="overflow-hidden rounded-2xl bg-gray-900 px-6 py-8 sm:px-8">
+      <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-2xl">
+          <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-gray-400">
+            <span className={`h-2 w-2 rounded-full ${status.dot}`} />
+            {status.text}
+          </p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            Spot unusual trading volume across Taiwan&apos;s stock market.
+          </h1>
+          <p className="mt-3 text-gray-300">
+            VolumeLens compares each TWSE and TPEx stock&apos;s volume with its 20-day average (relative volume), at
+            the close and live during market hours, so the stocks drawing unusual interest stand out.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              href="/radar"
+              className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-400"
+            >
+              View unusual volume
+            </Link>
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+            >
+              Source on GitHub
+            </a>
+          </div>
+        </div>
+        <dl className="grid shrink-0 grid-cols-3 gap-6 lg:gap-10">
+          <HeroStat label="Stocks tracked" value={market?.tracked_symbols?.toLocaleString('en-US')} />
+          <HeroStat label={session ? `Unusual on ${session}` : 'Unusual volume'} value={spikes?.total} />
+          <HeroStat label="Latest session" value={session} />
+        </dl>
+      </div>
     </section>
   )
 }
@@ -164,7 +219,8 @@ export default function Home() {
 
   const marketOpen = stocksRes?.market_open ?? marketRes?.market_open ?? null
   const stockList = stocksRes ? Object.values(stocksRes.data) : null
-  const indices = marketRes?.data.indices
+  const market = marketRes?.data
+  const indices = market?.indices
   const spikes = spikesRes?.data
 
   let status = { dot: 'bg-gray-300', text: 'Connecting…' }
@@ -174,13 +230,7 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-gray-900">Market Overview</h1>
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <span className={`h-2 w-2 rounded-full ${status.dot}`} />
-          {status.text}
-        </div>
-      </div>
+      <Hero status={status} market={market} spikes={spikes} />
 
       {stocksError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

@@ -13,10 +13,16 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const description =
+  "Scans ~2,300 TWSE and TPEx stocks for unusual trading volume, with end-of-day relative volume rankings and daily charts.";
+
 export const metadata = {
+  // Absolute base for the Open Graph image URL; set NEXT_PUBLIC_SITE_URL when deployed
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
   title: "VolumeLens — Taiwan Unusual Volume Scanner",
-  description:
-    "Scans ~2,300 TWSE and TPEx stocks for unusual trading volume, with end-of-day relative volume rankings and daily charts.",
+  description,
+  openGraph: { title: "VolumeLens", description, siteName: "VolumeLens", type: "website" },
+  twitter: { card: "summary_large_image", title: "VolumeLens", description },
 };
 
 export default function RootLayout({ children }) {

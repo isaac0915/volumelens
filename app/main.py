@@ -57,20 +57,44 @@ async def get_stocks():
 
 
 INDEX_CACHE_SECONDS = 15  # the dashboard polls every few seconds; don't forward each poll to MIS
-_index_cache: dict = {"at": 0.0, "data": []}
+_index_cache: dict = {"at": 0.0, "data": [], "refreshing": None}
+
+
+async def _refresh_indices() -> None:
+    try:
+        _index_cache["data"] = await fetch_indices()
+    except Exception:
+        pass  # keep serving the last good value
+    finally:
+        _index_cache["at"] = time.monotonic()
+        _index_cache["refreshing"] = None
 
 
 @app.get("/api/market")
 async def get_market():
-    """Market indices, cached briefly so many viewers don't multiply MIS requests."""
-    now = time.monotonic()
-    if now - _index_cache["at"] > INDEX_CACHE_SECONDS:
-        try:
-            _index_cache["data"] = await fetch_indices()
-        except Exception:
-            pass  # keep serving the last good value
-        _index_cache["at"] = now
-    return {"status": "success", "market_open": is_market_open(), "data": {"indices": _index_cache["data"]}}
+    """Market indices plus coverage stats.
+
+    Indices are cached stale-while-revalidate: a stale cache is returned
+    immediately while one background task refreshes it, so a slow MIS
+    response never blocks the dashboard. Only the very first request waits.
+    """
+    stale = time.monotonic() - _index_cache["at"] > INDEX_CACHE_SECONDS
+    if stale and _index_cache["refreshing"] is None:
+        _index_cache["refreshing"] = asyncio.create_task(_refresh_indices())
+    if not _index_cache["data"] and _index_cache["refreshing"] is not None:
+        await _index_cache["refreshing"]
+    async with AsyncSessionLocal() as session:
+        tracked = (await session.execute(select(func.count()).select_from(Stock))).scalar_one()
+        latest_session = (await session.execute(select(func.max(StockCandle.date)))).scalar_one()
+    return {
+        "status": "success",
+        "market_open": is_market_open(),
+        "data": {
+            "indices": _index_cache["data"],
+            "tracked_symbols": tracked,
+            "latest_session": latest_session.isoformat() if latest_session else None,
+        },
+    }
 
 
 DAILY_SPIKE_MULTIPLIER = 2.0
