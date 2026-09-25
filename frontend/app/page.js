@@ -7,7 +7,7 @@ import { useWatchlist } from '@/lib/watchlist'
 import WatchButton from '@/components/WatchButton'
 
 const INDEX_NAMES = { TAIEX: 'TAIEX', TPEX: 'TPEx Index' }
-const REPO_URL = 'https://github.com/isaac0915/stock_tracker'
+const REPO_URL = 'https://github.com/isaac0915/volumelens'
 
 const STOCKS_POLL_MS = 5000 // live quotes are cached ~10s server-side
 const MARKET_POLL_MS = 15000
