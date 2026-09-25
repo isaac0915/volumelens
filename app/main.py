@@ -12,6 +12,7 @@ from app.models.stock_quote import StockQuote
 from app.models.volume_alert import VolumeAlert
 from app.models.stock_candle import StockCandle
 from app.services.stock_poller import get_average_volume, poll_stocks, stock_cache
+from app.services.daily_sync import run_daily_sync
 from app.services.radar import run_radar
 
 fugle_client = RestClient(api_key=settings.fugle_api_key)
@@ -19,12 +20,15 @@ fugle_client = RestClient(api_key=settings.fugle_api_key)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(poll_stocks(fugle_client))
-    radar_task = asyncio.create_task(run_radar(fugle_client))
+    tasks = [
+        asyncio.create_task(poll_stocks(fugle_client)),
+        asyncio.create_task(run_radar(fugle_client)),
+        asyncio.create_task(run_daily_sync()),
+    ]
     yield
-    task.cancel()
-    radar_task.cancel()
-    for t in [task, radar_task]:
+    for t in tasks:
+        t.cancel()
+    for t in tasks:
         try:
             await t
         except asyncio.CancelledError:
